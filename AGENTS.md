@@ -26,7 +26,8 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 | `tools/ghidra/` | Headless Ghidra import, seeding and C export |
 | `tools/mame/` | Lua scripts: arcade trace, profiler and hardware access map; Mega Drive VDP trace and game-state probe |
 | `tools/analysis/` | Trace summaries, profile report, VDP dump renderer, 68000 disassembler |
-| `tools/check_md.sh` | One-command headless check of a Mega Drive ROM |
+| `tools/check_md.sh` | One-command headless check of a Mega Drive ROM (`TRACE_INPUT=arcade` plays the port) |
+| `tools/run_md.sh` | Runs a ROM in MAME with the Sega mapper enabled |
 | `analysis/` (ignored) | `roms/`, `work/` images, `ghidra/` projects, `out/` exports, `mame/` runs, `venv/` |
 
 `tools/README.md` has the commands. Skills in `.claude/skills/` cover the three recurring jobs: `trace-arcade`, `disassemble-68k`, `check-md-rom`.
@@ -59,9 +60,13 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 
 **The build**
 
-- Build with `analysis/venv/bin/python3 -I tools/build/build.py analysis/work/dino_prg.bin analysis/mame/dino_access/access_pcs.csv test/roms/md/cadillacs_md.md`. The output contains Capcom's program: never commit it.
+- Build with `analysis/venv/bin/python3 -I tools/build/build.py analysis/work/dino_prg.bin analysis/work/dino_gfx.bin analysis/mame/dino_access/access_pcs.csv test/roms/md/cadillacs_md.md`. The output contains Capcom's program and graphics: never commit it. Name ROMs `.md`: emulators pick the system from the extension.
 - Hardware accesses with fixed addresses are redirected to shadows at `0xFF1000` (I/O and video registers), `0xFF1200` (sound) and `0xFF1280` (player 3, EEPROM). The game's start-up clears that RAM, so the hardware layer rewrites its inputs every VBlank.
 - Stand-in DIP switches must read `0xFF`; a zero in DIP C bit 7 sends the game into test mode.
+- **Mapper in MAME.** MAME enables the Sega (SSF2) mapper only for a software-list entry with `slot` `rom_ssf2` and a 9 MB data area; `tools/run_md.sh` writes one. It implements banks 0–9 only (bank 10 and up segfault), and word writes to the bank registers crash it: use byte writes, and keep the ROM under 5 MB.
+- **Static patching pitfalls.** A table's start address is often another table's loop end marker (`lea $914000,a1` ends the scroll 3 clear); `build.py` leaves such end markers alone. Capstone invents operands when its buffer is too short; always give it 10+ bytes.
+- **Never walk an unterminated sprite list every frame.** 256 entries cost more than a frame; the hardware layer rebuilds the sprite table only when the game flips its list flag (`0xFFE9B4`).
+- The arcade kernel masks interrupts with `0x2600` to shut out its level-2 VBlank; on the Mega Drive that also delays the level-6 VBlank.
 - Take hardware-layer addresses from the linker's symbol table. GNU as shortens `jmp label`, so fixed-offset jump tables do not work.
 - Verify a build by reading the game's own state with `tools/mame/md_state.lua` (task slots, shadow registers, player state) and comparing with the arcade; a black screen says nothing yet.
 - The access map misses some executed instructions. Patch from it first, then statically.
