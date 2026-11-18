@@ -328,6 +328,26 @@ What makes it hard:
 
 A phased plan built on strategy B, with A's techniques for assets, is the working assumption for the next document.
 
+## 9. Next phase: three-way decompilation
+
+The next step is to take apart three ROMs and compare them:
+
+| ROM | Role |
+|---|---|
+| *Cadillacs and Dinosaurs* (World 930201), CPS-1 (`dino`) | The game to port |
+| *Final Fight*, CPS-1 (`ffight`) | The arcade original of a game that has a well-regarded Mega Drive port |
+| *Final Fight MD* (Mauro Xavier, fan port) | The reference for how a CPS-1 brawler is made to work on Mega Drive hardware |
+
+What each comparison can teach:
+
+- **`ffight` arcade vs `dino` arcade.** Both are Capcom CPS-1 brawlers a few years apart. Shared engine structure (task kernel, object structs, sprite and tilemap writers, sound command queue) tells us which findings about one carry over to the other.
+- **`ffight` arcade vs Final Fight MD.** The same scenes on both machines show the concrete answers to the gaps in [section 5](#5-the-rendering-gap): how layers were mapped to planes, how palettes were merged per scene, how sprites were cut and budgeted, how the 384-wide layout was fitted to 320, how many patterns are uploaded per frame, and which sound driver and sample rates are used.
+- **Apply to `dino`.** Use those answers as the starting configuration for the `dino` hardware layer and asset pipeline.
+
+One caveat shapes how the second comparison is done. Final Fight MD's author states it was written from scratch without the original source, so its code will not correspond to the arcade's routine by routine. The comparison is therefore about data and behaviour (VRAM layout, palettes, sprite lists, DMA volume per frame, ROM layout), observed in an emulator's VDP debugger and in the disassembly of its engine, more than about matching functions. If its announced source release is available, that replaces most of the disassembly work for that ROM.
+
+Ghidra is the default tool for all three (68000 support is built in; the two arcade programs need their ROM files byte-swapped and joined first, as done for the measurements in this document).
+
 ## Open questions
 
 Hardware facts not settled by the sources we read:
