@@ -942,6 +942,8 @@ build_cram:
     move.b  (a3)+, d0
     tst.w   d7
     bne.s   6f
+    btst    #0, hal_frames + 3
+    bne.w   5f
     lea     LINE_SRC, a0
     lea     LINE_RAW, a2
     lea     PALETTES, a6
