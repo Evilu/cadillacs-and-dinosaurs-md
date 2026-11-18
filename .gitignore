@@ -20,4 +20,4 @@ out/
 !.claude/skills/
 
 # local analysis output (extracted ROMs, disassembly, traces)
-analysis/
+/analysis/
