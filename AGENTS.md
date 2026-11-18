@@ -59,7 +59,7 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 
 **The build**
 
-- Build with `analysis/venv/bin/python3 -I tools/build/build.py analysis/work/dino_prg.bin analysis/mame/dino_access/access_pcs.csv test/roms/md/cadillacs_md.bin`. The output contains Capcom's program: never commit it.
+- Build with `analysis/venv/bin/python3 -I tools/build/build.py analysis/work/dino_prg.bin analysis/mame/dino_access/access_pcs.csv test/roms/md/cadillacs_md.md`. The output contains Capcom's program: never commit it.
 - Hardware accesses with fixed addresses are redirected to shadows at `0xFF1000` (I/O and video registers), `0xFF1200` (sound) and `0xFF1280` (player 3, EEPROM). The game's start-up clears that RAM, so the hardware layer rewrites its inputs every VBlank.
 - Stand-in DIP switches must read `0xFF`; a zero in DIP C bit 7 sends the game into test mode.
 - Take hardware-layer addresses from the linker's symbol table. GNU as shortens `jmp label`, so fixed-offset jump tables do not work.

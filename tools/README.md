@@ -96,9 +96,9 @@ Writes `access_pcs.csv` (every instruction that read or wrote arcade I/O, GFX RA
 
 ```sh
 analysis/venv/bin/python3 -I tools/build/build.py analysis/work/dino_prg.bin \
-  analysis/mame/dino_access/access_pcs.csv test/roms/md/cadillacs_md.bin
+  analysis/mame/dino_access/access_pcs.csv test/roms/md/cadillacs_md.md
 TRACE_FRAMES=3600 STATE_EVERY=300 PRESS="700:A,800:Start,1000:B,1600:Right" \
-  mame genesis -cart test/roms/md/cadillacs_md.bin -video none -sound none -skip_gameinfo -nothrottle \
+  mame genesis -cart test/roms/md/cadillacs_md.md -video none -sound none -skip_gameinfo -nothrottle \
   -seconds_to_run 90 -autoboot_script tools/mame/md_state.lua
 ```
 

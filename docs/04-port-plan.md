@@ -106,7 +106,7 @@ Built ROMs go to `test/roms/md/`, which git ignores because they contain the use
 
 ```sh
 analysis/venv/bin/python3 -I tools/build/build.py analysis/work/dino_prg.bin \
-  analysis/mame/dino_access/access_pcs.csv test/roms/md/cadillacs_md.bin
+  analysis/mame/dino_access/access_pcs.csv test/roms/md/cadillacs_md.md
 ```
 
 Pad: A = coin, Start = start, B = attack, C = jump.
