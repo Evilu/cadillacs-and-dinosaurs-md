@@ -12,6 +12,10 @@ local layer_ctrl = tonumber(os.getenv("LAYER_CTRL") or "2e", 16)
 local masks = {}
 for m in string.gmatch(os.getenv("LAYER_MASKS") or "02,04,08", "[^,]+") do masks[#masks + 1] = tonumber(m, 16) end
 local cache_cap = tonumber(os.getenv("VRAM_PATTERNS") or "1400")
+-- IDLE_FLAG: address of the frame flag the scheduler loop polls once per task slot
+-- (ffight ff1100, dino ff0152). Reads per frame measure time spent in the scheduler.
+local idle_flag = tonumber(os.getenv("IDLE_FLAG") or "0", 16)
+local idle_reads = 0
 
 local mem = manager.machine.memory.shares
 local gfx = mem[":gfxram"]
@@ -219,13 +223,19 @@ end
 local csv = io.open(out_dir .. "/cps1_frames.csv", "w")
 csv:write("frame,obj_entries,obj_tiles,obj_unique,md_sprites_est,obj_line_tiles_max,obj_lines_over_320px," ..
   "s1_on,s1_unique,s1_pals,s2_on,s2_unique,s2_pals,s2_prio_cells,s3_on,s3_unique,s3_pals,s3_prio_cells," ..
-  "palettes,colours,working_set_patterns,new_patterns_vs_prev,lru_miss_patterns,lru_size,obj_hash,layer_ctrl,pc\n")
+  "palettes,colours,working_set_patterns,new_patterns_vs_prev,lru_miss_patterns,lru_size,obj_hash,layer_ctrl,pc,idle_reads\n")
+if idle_flag ~= 0 then
+  idle_tap = cpu.spaces["program"]:install_read_tap(idle_flag & ~1, idle_flag | 1, "idle", function()
+    idle_reads = idle_reads + 1
+  end)
+end
 
 local frame = 0
 local errs = 0
 local function on_frame()
   frame = frame + 1
-  csv:write(frame, ",", frame_stats(frame), "\n")
+  csv:write(frame, ",", frame_stats(frame), ",", idle_reads, "\n")
+  idle_reads = 0
   local t = frame % 1800
   press("Coin 1", t >= 60 and t < 66)
   press("1 Player Start", t >= 120 and t < 126)

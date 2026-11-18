@@ -159,6 +159,8 @@ Speed is the difference:
 
 So the Mega Drive has roughly 55–64% of the arcade's CPU time per frame, and the hardware layer we add also has to run inside that budget. Slowdown in busy scenes is a real risk; a 30 fps fallback under load (as Final Fight MD offers) is the usual answer.
 
+These ratios compare capacity, not need: they only matter to the extent the arcade program uses its frame. Measured on Final Fight, the arcade's game work takes 56% of a 10 MHz frame on average and would fit a Mega Drive frame with about a quarter to spare ([doc 02, section 2.2](02-final-fight-arcade-vs-md.md#22-how-busy-the-arcade-cpu-is)). The same measurement for Cadillacs and Dinosaurs is pending.
+
 ### 2.2 Memory maps
 
 | Range | CPS-1 (`dino`) | Mega Drive |
@@ -219,7 +221,7 @@ The problem is the same fact seen from the other side: the game uses all 64 KB o
 | `TRAP #7` | `0xA18` | Restart the current task at A0 |
 | `TRAP #12` | `0xA2E` | Raise or lower the interrupt mask |
 
-- The scheduler at `0x83C` walks the slots, resumes each runnable task with `RTE`, and starts over when the VBlank handler sets the frame flag.
+- The scheduler at `0x83C` walks the slots over and over, resuming each runnable task with `RTE`. A task that yields is runnable again on the next pass; a task that sleeps becomes runnable when the VBlank handler has counted its timer down, which is what ties the game to the frame rate.
 
 None of this touches CPS-1 hardware. It uses only standard 68000 features, all of which the Mega Drive has, so the kernel should run unchanged.
 
@@ -275,8 +277,8 @@ sequenceDiagram
 **How tightly the code is tied to the hardware.** Scanning the program for absolute addresses (**ROM**, approximate because data can look like addresses):
 
 - About 2,100 references into GFX RAM (`0x900000–0x92FFFF`), spread over the sprite buffers, all three tilemaps and the palette area.
-- A few dozen references to CPS-A/CPS-B registers, almost all in reset and the VBlank handler.
-- About 40 references to the QSound shared RAM, player 3 and EEPROM ports.
+- About 50 references to CPS-A/CPS-B registers, almost all in reset and the VBlank handler.
+- About 50 references to the QSound shared RAM, player 3 and EEPROM ports.
 
 More GFX RAM access happens through address registers and will not show up in that count. The direct references are too many to rewrite by hand one at a time, which shapes the strategy in [section 8](#8-what-this-means-for-the-port).
 
@@ -344,7 +346,7 @@ flowchart LR
 ### 3.3 Sprites
 
 - 256 entries per frame: X, Y, tile code, attributes. A byte of `0xFF` in the attribute marks the end.
-- Each entry can be a block of up to 16×16 tiles of 16×16 pixels, taken from a 16-tile-wide sheet. A whole character is often one or two entries.
+- Each entry can be a block of up to 16×16 tiles of 16×16 pixels, taken from a 16-tile-wide sheet, so a whole character can be one or two entries. Final Fight hardly uses this (see [doc 02](02-final-fight-arcade-vs-md.md)); how much Cadillacs and Dinosaurs does is still to be measured.
 - Earlier entries are drawn on top.
 - The hardware renders sprites into a frame buffer, so there is no per-scanline sprite limit in the sources we read, and sprites appear one frame after the tile layers.
 - No per-sprite priority bit; ordering against tiles comes from the layer order and the priority masks.
@@ -428,7 +430,7 @@ pie showData
 - Per scanline: 20 sprites and 320 sprite pixels. Excess sprites are dropped on that line, last in link order first.
 - Sprite patterns come from the same VRAM as plane patterns.
 
-Rough sizing for this game (our estimate): a 64×96 px character is 24 CPS-1 tiles in one or two arcade entries, and six 32×32 Mega Drive sprites. With 80 sprites that is about 13 such characters before anything else is drawn, and five characters standing in a row reach the 320 px per-line limit.
+Rough sizing for this game (our estimate): a 64×96 px character is 24 CPS-1 tiles and six 32×32 Mega Drive sprites. With 80 sprites that is about 13 such characters before anything else is drawn, and five characters standing in a row reach the 320 px per-line limit.
 
 ### 4.5 Colour
 
@@ -590,7 +592,7 @@ What makes it hard:
 1. **Tile streaming.** Arcade code assumes any tile is free to show. The cache, upload scheduling and behaviour when the budget is exceeded decide how the port looks in motion.
 2. **Colour.** 1,920 simultaneous colours into 61. Needs offline analysis of which palettes each scene uses (MAME traces) and a remapping pipeline.
 3. **CPU time.** 55–64% of the arcade budget, minus the translation layer. Hot arcade routines that only build video tables may need to be replaced with versions that build Mega Drive tables directly.
-4. **GFX RAM references.** About 2,100 direct ones. Options: give the game a shadow GFX RAM and translate it (costs RAM we may not have: the arcade tables in use total about 54 KB), or patch the writers to produce Mega Drive data. Work RAM usage has to be measured first.
+4. **GFX RAM references.** About 2,100 direct ones. Options: give the game a shadow GFX RAM and translate it (costs RAM we may not have: the arcade tables in use total about 58 KB), or patch the writers to produce Mega Drive data. Work RAM usage has to be measured first.
 5. **Screen width.** 64 px narrower, in a game laid out for 384.
 6. **Sprite limits.** 80 sprites and 320 px per line in a three-player brawler.
 7. **Music.** A full FM arrangement.
