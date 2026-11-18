@@ -1,0 +1,20 @@
+# ROMs and dumps are never committed
+*.zip
+*.7z
+*.bin
+*.gen
+*.smd
+*.rom
+roms/
+# build output
+build/
+out/
+*.o
+*.elf
+*.lst
+*.map
+# local
+.DS_Store
+.idea/
+.claude/*
+!.claude/skills/
