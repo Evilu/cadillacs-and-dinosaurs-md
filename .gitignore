@@ -7,8 +7,8 @@
 *.rom
 roms/
 # build output
-build/
-out/
+/build/
+/out/
 *.o
 *.elf
 *.lst
