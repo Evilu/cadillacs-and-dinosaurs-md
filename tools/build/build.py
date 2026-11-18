@@ -67,11 +67,14 @@ INLINE_PATCHES = [
     (0x00cc96, '7a1f22d851cdfffc', '41e8008043e90080', None),
     (0x0130e4, '41f90090c00034302002', '4eb9{:08x}4e714e71', 'hal_attr'),
     (0x01366a, '41f90090c00034302002', '4eb9{:08x}4e714e71', 'hal_attr'),
+    (0x099f14, '41ed8e667000' '30c0b0fc800066f8', '4eb9{:08x}' + '4e71' * 4, 'hal_clear_game_ram'),
 ]
 FAST_PATH_HANDLERS = {9: 'trap_meta', 10: 'trap_copy', 11: 'trap_fill'}
 SKIPPED_ROUTINES = [
     (0x00a7b8, '207c00918000', 'fills 0x918000, a table the port drops'),
 ]
+DEBUG_MARKERS = [(0x000a40, '48e7e080'), (0x000a48, '48e7e080')]
+DEBUG_MARKER_BODY = (0xa40, 0xa76)
 SKIP_RANGES = [(0xaa944, 0xaac00)]
 GFX_RAM = (0x900000, 0x930000)
 SPRITE_LISTS = [(0xb12, 0x900000, 0xff2000), (0xb24, 0x904000, 0xff2800),
@@ -190,6 +193,10 @@ def apply_fast_paths(rom, sym, report):
         assert rom[addr:addr + len(original) // 2].hex() == original, f'unexpected code at {addr:06x}'
         rom[addr:addr + 2] = b'\x4e\x75'
         covered.append((addr, addr + 0x42))
+    for addr, original in DEBUG_MARKERS:
+        assert rom[addr:addr + 4].hex() == original, f'unexpected code at {addr:06x}'
+        rom[addr:addr + 2] = b'\x4e\x75'
+    covered.append(DEBUG_MARKER_BODY)
     report.append(f'{len(FAST_PATHS)} tilemap routines replaced by fast paths, {len(INLINE_PATCHES)} patched in place, {len(SKIPPED_ROUTINES)} skipped')
     return covered
 

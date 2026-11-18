@@ -49,7 +49,7 @@ Everything here was seen or measured in stage 1 under scripted play in MAME. Lat
 - Only one player has been tried.
 
 **Speed**
-- Sprites are converted every second frame, and every third or fourth when the game falls behind, so they animate at 30 Hz or less.
+- Sprites are converted every frame when the game keeps up, and every second to fourth frame when it falls behind.
 - Brawls with many enemies run at about 42–58 game frames a second instead of 60.
 - Scene changes and doors opening can stall the game for a few frames while background colours are worked out again.
 - The select screen stutters while it loads.
@@ -60,10 +60,11 @@ Everything here was seen or measured in stage 1 under scripted play in MAME. Lat
 - The select screen briefly shows the previous scene's colours on the way into the stage.
 
 **Graphics**
-- The title logo is missing a few of its 56 pieces.
+- The title logo may still lack a piece or two where its letters overlap.
 - The logo and the select portraits overlap for a moment between the title and select screens.
 - Barrels sometimes lose pieces or show green stripes.
 - When the tile caches run out, a few background cells can stay blank for up to a second.
+- The jungle scene of the attract-mode demo needs about 190 different playfield tiles; the cache holds 160. Cells without a slot draw a neighbouring cell's tile until a slot frees up, so a few cells show the wrong tile for a while. Seen in MAME only; no other stage has been played.
 
 **Hardware**
 - Never run on a real console or flash cart. Do not try yet: some code paths still touch arcade addresses that a real Mega Drive may not tolerate.

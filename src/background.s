@@ -48,6 +48,7 @@
     .equ s2_wipe,       BG_VARS + 40    | the game filled the map with a blank tile
     .equ dirty_cols,    BG_VARS + 36    | bit per ring column with more changes than the list holds
     .equ s2_refresh,    BG_VARS + 30    | redraw every cell of the window in place
+    .equ retry_ok,      BG_VARS + 60    | nonzero on the frames that retry cells which found no slot
     .equ ARCADE_FILL_END, 0x000ba8
     .equ PATCH_HASH,    0x198000    | 1024 words: offset of the entry for (pc >> 1) & 1023, 0xffff empty
 
@@ -256,6 +257,62 @@ s2_release:
     subq.b  #1, 0(a3,d1.w)
 9:  rts
 
+| The cell found no slot: it borrows the tile of a neighbouring cell (left, above, right,
+| below) until the retry succeeds. r_col d6, r_row d7 -> d5 slot, or -1. Keeps a0.
+s2_neighbour:
+    movem.l d0-d3/a1, -(sp)
+    moveq   #-1, d5
+    lea     RING_SLOT, a1
+    move.w  d6, d2
+    andi.w  #31, d2
+    move.w  d7, d3
+    andi.w  #15, d3
+    lsl.w   #5, d3
+    move.w  d2, d0
+    subq.w  #1, d0
+    andi.w  #31, d0
+    add.w   d3, d0
+    bsr.s   nb_try
+    bpl.s   nb_found
+    move.w  d3, d0
+    subi.w  #32, d0
+    andi.w  #511, d0
+    add.w   d2, d0
+    bsr.s   nb_try
+    bpl.s   nb_found
+    move.w  d2, d0
+    addq.w  #1, d0
+    andi.w  #31, d0
+    add.w   d3, d0
+    bsr.s   nb_try
+    bpl.s   nb_found
+    move.w  d3, d0
+    addi.w  #32, d0
+    andi.w  #511, d0
+    add.w   d2, d0
+    bsr.s   nb_try
+    bmi.s   nb_none
+nb_found:
+    move.w  d5, d1
+    add.w   d1, d1
+    lea     S2_REF, a1
+    addq.w  #1, 0(a1,d1.w)
+nb_none:
+    movem.l (sp)+, d0-d3/a1
+    rts
+
+| d0 ring index -> d5 slot there, N set when none
+nb_try:
+    moveq   #0, d1
+    move.b  0(a1,d0.w), d1
+    cmpi.b  #0xff, d1
+    beq.s   1f
+    move.w  d1, d5
+    tst.w   d5
+    rts
+1:  moveq   #-1, d5
+    rts
+
 | The playfield is out of slots: turns a free far background slot into four.
 s2_borrow:
     movem.l d0-d2/a0-a1, -(sp)
@@ -439,9 +496,13 @@ render_cell:
     move.w  d6, d1
     lsl.w   #8, d1
     or.w    d7, d1
+    ori.w   #0x8000, d1
     move.w  d1, 0(a1,d0.w)
     addq.w  #1, dirty_count
-    bra.w   cell_blank
+    bsr.w   s2_neighbour
+    tst.w   d5
+    bmi.w   cell_blank
+    moveq   #0, d1
 15:
     move.b  d5, (a0)
     btst    #1, d1
@@ -719,24 +780,39 @@ render_row:
 
 process_dirty:
     move.w  dirty_count, d0
-    beq.s   scan_palette
+    beq.w   scan_palette
     clr.w   dirty_count
     move.w  d0, -(sp)
     clr.w   u_count
+    moveq   #0, d1
+    move.l  hal_frames, d0
+    andi.w  #7, d0
+    bne.s   3f
+    moveq   #-1, d1
+3:  move.w  d1, retry_ok
 4:  move.w  u_count, d0
     add.w   d0, d0
     lea     DIRTY, a0
     move.w  0(a0,d0.w), d0
-    move.w  d0, d1
+    bpl.s   5f
+    tst.w   retry_ok
+    bne.s   5f
+    move.w  dirty_count, d1
+    add.w   d1, d1
+    move.w  d0, 0(a0,d1.w)
+    addq.w  #1, dirty_count
+    bra.s   6f
+5:  move.w  d0, d1
     andi.w  #0xff, d1
+    andi.w  #0x7fff, d0
     lsr.w   #8, d0
     move.w  d0, r_col
     move.w  d1, r_row
     bsr.w   render_cell
-    addq.w  #1, u_count
+6:  addq.w  #1, u_count
     move.w  u_count, d0
     cmp.w   (sp), d0
-    blo.s   4b
+    blo.w   4b
     addq.l  #2, sp
 
 | Every 32 frames: the most used playfield palette on screen goes to CRAM line 2.
