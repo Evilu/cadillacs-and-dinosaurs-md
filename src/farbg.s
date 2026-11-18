@@ -28,18 +28,18 @@
     .equ s3_full,       S3_VARS + 10
     .equ s3_hscroll,    S3_VARS + 12
     .equ s3_vscroll,    S3_VARS + 14
-    .equ s3_pal,        S3_VARS + 16
     .equ s3_count,      S3_VARS + 18
+    .equ s3_refresh,    S3_VARS + 16
     .equ t_col,         S3_VARS + 20
     .equ t_row,         S3_VARS + 22
     .equ cam3_x,        S3_VARS + 24
     .equ cam3_y,        S3_VARS + 26
     .equ s3_sweep,      S3_VARS + 28
     .equ s3_pending,    S3_VARS + 30
-    .equ S3_PAL_COUNT,  S3_VARS + 32
     .equ s3_rel_x,      S3_VARS + 96
     .equ s3_rel_y,      S3_VARS + 98
     .equ s3_last_y,     S3_VARS + 100
+    .equ t_pal,         S3_VARS + 102
     .equ TILE_FLAGS3,   0x1a0000    | per 32 x 32 tile code 0-0x1fff: nonzero if it has pixels
     .equ TILE3_DATA,    TILE_DATA   | 32 x 32 tile c: 16 patterns (column-major) at TILE3_DATA + c * 512
 
@@ -71,7 +71,6 @@ s3_init:
     clr.w   s3_dirty
     clr.w   s3_valid
     clr.w   s3_full
-    clr.w   s3_pal
     clr.w   s3_sweep
     move.w  #S3_W, s3_pending
     rts
@@ -194,6 +193,9 @@ sweep_column3:
 | d0 tile code -> d5 slot or -1
 s3_acquire:
     ori.w   #0x8000, d0
+    move.w  t_pal, d1
+    andi.w  #31, d1
+    move.b  d1, h_pal
     bsr.w   hash_lookup
     tst.w   d1
     bmi.s   1f
@@ -201,6 +203,8 @@ s3_acquire:
     add.w   d1, d1
     lea     S3_REF, a3
     addq.w  #1, 0(a3,d1.w)
+    bclr    #2, 0(a3,d1.w)
+    bne.s   s3_upload
     rts
 1:  move.w  s3_free_top, d1
     bne.s   2f
@@ -212,13 +216,20 @@ s3_acquire:
     moveq   #0, d5
     move.b  0(a3,d1.w), d5
     move.w  d0, (a2)
-    move.w  d5, 2(a2)
+    move.b  h_pal, 2(a2)
+    move.b  d5, 3(a2)
+    moveq   #0, d1
+    move.b  h_pal, d1
+    ror.w   #5, d1
+    addq.w  #1, d1
+    move.w  d1, -(sp)
     move.w  d5, d1
     add.w   d1, d1
     lea     S3_REF, a3
-    move.w  #1, 0(a3,d1.w)
+    move.w  (sp)+, 0(a3,d1.w)
     lea     S3_KEY, a3
     move.w  d0, 0(a3,d1.w)
+s3_upload:
     lea     s3_slot_pat(pc), a3
     move.w  0(a3,d1.w), d1
     lsl.w   #5, d1
@@ -244,11 +255,11 @@ s3_acquire:
     andi.l  #0x7ffff, d1
     addi.l  #WINDOW, d1
     movea.l d1, a3
-    lea     VDP_DATA, a4
-    moveq   #127, d2
-3:  move.l  (a3)+, (a4)
-    dbra    d2, 3b
-    rts
+    move.w  #255, d2
+    move.w  t_pal, d1
+    andi.w  #31, d1
+    addi.w  #32, d1
+    bra.w   remap_copy
 
 | d5 slot
 s3_release:
@@ -256,7 +267,12 @@ s3_release:
     add.w   d1, d1
     lea     S3_REF, a3
     subq.w  #1, 0(a3,d1.w)
+    move.w  0(a3,d1.w), d0
+    move.w  d0, d2
+    andi.w  #0x3ff, d2
     bne.s   9f
+    rol.w   #5, d0
+    move.b  d0, h_pal
     lea     S3_KEY, a3
     move.w  0(a3,d1.w), d0
     bsr.w   hash_lookup
@@ -300,6 +316,7 @@ render_cell3:
     lea     S3_STORE, a1
     adda.w  d0, a1
     move.w  2(a1), -(sp)
+    move.w  2(a1), t_pal
     move.w  (a1), d0
     cmpi.w  #0x1fff, d0
     bhi.s   3f
@@ -425,9 +442,30 @@ update_scroll3:
     beq.w   3f
     tst.w   s3_full
     bne.w   3f
-    cmp.w   s3_row0, d1
+    tst.w   s3_refresh
+    beq.s   21f
+    clr.w   s3_refresh
+    clr.w   s3_dirty
+    bsr.w   render_window3
+    bra.w   6f
+21: move.w  d1, d2
+    sub.w   s3_row0, d2
+    andi.w  #63, d2
+    beq.s   23f
+    cmpi.w  #1, d2
+    bne.s   22f
+    move.w  s3_row0, d3
+    addq.w  #8, d3
+    move.w  d1, s3_row0
+    bsr.w   render_row3
+    bra.w   update_scroll3
+22: cmpi.w  #63, d2
     bne.w   3f
-    move.w  d0, d2
+    move.w  d1, s3_row0
+    move.w  d1, d3
+    bsr.w   render_row3
+    bra.w   update_scroll3
+23: move.w  d0, d2
     sub.w   s3_col0, d2
     andi.w  #63, d2
     beq.w   5f
@@ -466,17 +504,24 @@ update_scroll3:
     bsr.w   clear_column3
     subq.w  #1, s3_count
     bpl.s   7b
-    bra.s   5f
+    bra.w   5f
 3:  move.w  d0, s3_col0
     move.w  d1, s3_row0
     move.w  #1, s3_valid
     clr.w   s3_full
+    clr.w   s3_refresh
     clr.w   s3_dirty
+    move.w  #0x8134, VDP_CTRL
     move.w  #15, s3_count
 15: move.w  s3_count, d3
     bsr.w   clear_column3
     subq.w  #1, s3_count
     bpl.s   15b
+    bsr.s   render_window3
+    move.w  #0x8174, VDP_CTRL
+    bra.w   6f
+
+render_window3:
     move.w  #S3_W - 1, s3_count
 4:  move.w  s3_col0, d3
     add.w   s3_count, d3
@@ -484,7 +529,22 @@ update_scroll3:
     bsr.w   render_column3
     subq.w  #1, s3_count
     bpl.s   4b
-    bra.s   6f
+    rts
+
+| d3 arcade row: draws its cells across the window
+render_row3:
+    andi.w  #63, d3
+    move.w  d3, t_row
+    move.w  #S3_W - 1, s3_count
+1:  move.w  s3_col0, d0
+    add.w   s3_count, d0
+    andi.w  #63, d0
+    move.w  d0, t_col
+    bsr.w   render_cell3
+    subq.w  #1, s3_count
+    bpl.s   1b
+    rts
+
 5:  move.w  s3_dirty, d0
     beq.s   6f
     clr.w   s3_dirty
@@ -540,47 +600,7 @@ update_scroll3:
     bsr.w   sweep_column3
     subq.w  #1, s3_count
     bpl.s   17b
-16: move.l  hal_frames, d0
-    andi.w  #31, d0
-    cmpi.w  #16, d0
-    bne.s   9f
-    lea     S3_PAL_COUNT, a0
-    moveq   #15, d0
-10: clr.l   (a0)+
-    dbra    d0, 10b
-    lea     S3_PAL_COUNT, a0
-    lea     S3_STORE + 2, a1
-    move.w  s3_col0, d6
-    moveq   #10, d5
-11: move.w  s3_row0, d7
-    moveq   #6, d4
-12: move.w  d6, d0
-    andi.w  #63, d0
-    lsl.w   #4, d0
-    move.w  d7, d1
-    andi.w  #15, d1
-    or.w    d1, d0
-    lsl.w   #2, d0
-    move.w  0(a1,d0.w), d0
-    andi.w  #31, d0
-    add.w   d0, d0
-    addq.w  #1, 0(a0,d0.w)
-    addq.w  #1, d7
-    dbra    d4, 12b
-    addq.w  #1, d6
-    dbra    d5, 11b
-    moveq   #0, d1
-    moveq   #0, d2
-    moveq   #31, d0
-13: move.w  (a0)+, d3
-    cmp.w   d1, d3
-    bls.s   14f
-    move.w  d3, d1
-    moveq   #31, d2
-    sub.w   d0, d2
-14: dbra    d0, 13b
-    move.w  d2, s3_pal
-9:  rts
+16: rts
 
 | d0 address in the arcade scroll 3 table -> d4 store offset, d2 column, d3 row
 s3_offset:
@@ -621,7 +641,21 @@ s3_write:
     bsr.s   s3_offset
     lea     S3_STORE, a1
     move.w  d1, 0(a1,d4.w)
-    tst.w   s3_valid
+    btst    #1, d4
+    beq.s   7f
+    move.w  -2(a1,d4.w), d4
+    cmpi.w  #0x1fff, d4
+    bhi.s   7f
+    lea     TILE_FLAGS3, a1
+    tst.b   0(a1,d4.w)
+    beq.s   7f
+    move.w  d1, d4
+    andi.w  #31, d4
+    lea     PM_INDEX + 32, a1
+    cmpi.b  #0xff, 0(a1,d4.w)
+    bne.s   7f
+    move.w  #1, q_request
+7:  tst.w   s3_valid
     beq.s   9f
     move.w  d2, d4
     sub.w   s3_col0, d4
@@ -636,7 +670,7 @@ s3_write:
     move.w  s3_dirty, d4
     cmpi.w  #32, d4
     blo.s   1f
-    move.w  #1, s3_full
+    move.w  #1, s3_refresh
     bra.s   9f
 1:  lsl.w   #8, d2
     or.w    d3, d2

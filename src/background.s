@@ -16,15 +16,16 @@
     .equ S2_SLOTS,      128         | patterns 0x220-0x41f
     .equ S2_W,          23          | columns drawn: the 21 visible ones plus one each side
     .equ S2_PATTERN,    0x220       | first VRAM pattern of the playfield tile cache
-    .equ HASH,          0xff7000    | 512 entries: tile code (0xffff empty), slot
-    .equ HASH_END,      HASH + 2048
-    .equ S2_REF,        0xff7800    | per slot: plane cells using it
-    .equ S2_KEY,        0xff7990    | per slot: tile code
-    .equ FREE_STACK,    0xff7b20    | free slot numbers
-    .equ RING_SLOT,     0xff7c00    | per ring cell (32 x 16): slot, 0xff for none
-    .equ DIRTY,         0xff7e00    | 64 words: col << 8 | row
-    .equ BG_VARS,       0xff7e80
-    .equ COVER,         0xff7f00    | 32 longs, one per ring column: bit r set if store row r shows a fully opaque tile
+    .equ HASH,          0xff7000    | 256 entries: tile code (0xffff empty), slot
+    .equ HASH_END,      HASH + 1024
+    .equ S2_REF,        0xff7400    | per slot: cells using it (bits 0-9), reload wanted (bit 10), palette (bits 11-15)
+    .equ S2_KEY,        0xff7500    | per slot: tile code
+    .equ FREE_STACK,    0xff7600    | free slot numbers
+    .equ RING_SLOT,     0xff7680    | per ring cell (32 x 16): slot, 0xff for none
+    .equ DIRTY,         0xff7880    | 64 words: col << 8 | row
+    .equ BG_VARS,       0xff7900
+    .equ S2_HALF,       0xff7f00    | 2048 bits, one per store cell: which half of the 64 arcade rows it holds
+    .equ COVER,         0xff7960    | 32 longs, one per ring column: bit r set if store row r shows a fully opaque tile
     .equ free_top,      BG_VARS
     .equ dirty_count,   BG_VARS + 2
     .equ s2_valid,      BG_VARS + 4
@@ -33,20 +34,20 @@
     .equ s2_full,       BG_VARS + 10
     .equ s2_hscroll,    BG_VARS + 12
     .equ s2_vscroll,    BG_VARS + 14
-    .equ s2_pal,        BG_VARS + 16
+    .equ h_pal,         BG_VARS + 16    | arcade palette that goes with the key in hash_lookup
     .equ u_count,       BG_VARS + 18
     .equ r_col,         BG_VARS + 20
     .equ r_row,         BG_VARS + 22
     .equ cam2_x,        BG_VARS + 26
     .equ cam2_y,        BG_VARS + 28
     .equ r_attr,        BG_VARS + 24
-    .equ S2_PAL_COUNT,  BG_VARS + 32
+    .equ s2_refresh,    BG_VARS + 30    | redraw every cell of the window in place
     .equ ARCADE_FILL_END, 0x000ba8
     .equ PATCH_HASH,    0x198000    | 1024 words: offset of the entry for (pc >> 1) & 1023, 0xffff empty
 
 bg_init:
     lea     HASH, a0
-    move.w  #511, d0
+    move.w  #255, d0
 1:  move.l  #0xffff0000, (a0)+
     dbra    d0, 1b
     lea     S2_REF, a0
@@ -67,31 +68,38 @@ bg_init:
     clr.w   dirty_count
     clr.w   s2_valid
     clr.w   s2_full
-    clr.w   s2_pal
+    bsr.w   bgpal_init
     bra.w   s3_init
 
 | ---------------------------------------------------------------- tile cache
 
-| d0 key -> d1 slot or -1, a2 entry (the free entry when not found)
+| d0 key, h_pal palette -> d1 slot or -1, a2 entry (the free entry when not found).
+| An entry is the key word, the palette byte and the slot byte: the game draws
+| shadows by reusing a tile with a darker palette, and each needs its own pixels.
 hash_lookup:
     move.w  d0, d1
     lsr.w   #7, d1
     eor.w   d0, d1
-    andi.w  #511, d1
+    andi.w  #255, d1
     lsl.w   #2, d1
     lea     HASH, a2
     adda.w  d1, a2
 1:  move.w  (a2), d1
     cmp.w   d0, d1
+    bne.s   4f
+    move.b  2(a2), d1
+    cmp.b   h_pal, d1
     beq.s   2f
-    cmpi.w  #0xffff, d1
+    bra.s   5f
+4:  cmpi.w  #0xffff, d1
     beq.s   3f
-    addq.l  #4, a2
+5:  addq.l  #4, a2
     cmpa.l  #HASH_END, a2
     blo.s   1b
     lea     HASH, a2
     bra.s   1b
-2:  move.w  2(a2), d1
+2:  moveq   #0, d1
+    move.b  3(a2), d1
     rts
 3:  moveq   #-1, d1
     rts
@@ -109,16 +117,16 @@ hash_delete:
     move.w  d1, d2
     lsr.w   #7, d2
     eor.w   d1, d2
-    andi.w  #511, d2
+    andi.w  #255, d2
     lsl.w   #2, d2
     lea     HASH, a4
     adda.w  d2, a4
     move.l  a2, d3
     sub.l   a4, d3
-    andi.l  #2047, d3
+    andi.l  #1023, d3
     move.l  a2, d4
     sub.l   a3, d4
-    andi.l  #2047, d4
+    andi.l  #1023, d4
     cmp.l   d4, d3
     blo.s   1b
     move.l  (a2), (a3)
@@ -129,6 +137,9 @@ hash_delete:
 
 | d0 tile code -> d5 slot or -1
 s2_acquire:
+    move.w  r_attr, d1
+    andi.w  #31, d1
+    move.b  d1, h_pal
     bsr.w   hash_lookup
     tst.w   d1
     bmi.s   1f
@@ -136,6 +147,8 @@ s2_acquire:
     add.w   d1, d1
     lea     S2_REF, a3
     addq.w  #1, 0(a3,d1.w)
+    bclr    #2, 0(a3,d1.w)
+    bne.s   upload_tile
     rts
 1:  move.w  free_top, d1
     bne.s   2f
@@ -147,11 +160,17 @@ s2_acquire:
     moveq   #0, d5
     move.b  0(a3,d1.w), d5
     move.w  d0, (a2)
-    move.w  d5, 2(a2)
+    move.b  h_pal, 2(a2)
+    move.b  d5, 3(a2)
+    moveq   #0, d1
+    move.b  h_pal, d1
+    ror.w   #5, d1
+    addq.w  #1, d1
+    move.w  d1, -(sp)
     move.w  d5, d1
     add.w   d1, d1
     lea     S2_REF, a3
-    move.w  #1, 0(a3,d1.w)
+    move.w  (sp)+, 0(a3,d1.w)
     lea     S2_KEY, a3
     move.w  d0, 0(a3,d1.w)
 
@@ -181,11 +200,10 @@ upload_tile:
     andi.l  #0x7ffff, d1
     addi.l  #WINDOW, d1
     movea.l d1, a3
-    lea     VDP_DATA, a4
-    moveq   #31, d2
-3:  move.l  (a3)+, (a4)
-    dbra    d2, 3b
-    rts
+    moveq   #63, d2
+    move.w  r_attr, d1
+    andi.w  #31, d1
+    bra.w   remap_copy
 
 | d5 slot
 s2_release:
@@ -193,7 +211,12 @@ s2_release:
     add.w   d1, d1
     lea     S2_REF, a3
     subq.w  #1, 0(a3,d1.w)
+    move.w  0(a3,d1.w), d0
+    move.w  d0, d2
+    andi.w  #0x3ff, d2
     bne.s   9f
+    rol.w   #5, d0
+    move.b  d0, h_pal
     lea     S2_KEY, a3
     move.w  0(a3,d1.w), d0
     bsr.w   hash_lookup
@@ -247,6 +270,18 @@ render_cell:
     andi.w  #31, d1
     or.w    d1, d0
     lsl.w   #2, d0
+    move.w  d0, d1
+    lsr.w   #5, d1
+    lea     S2_HALF, a1
+    move.w  d0, d2
+    lsr.w   #2, d2
+    andi.w  #7, d2
+    btst    d2, 0(a1,d1.w)
+    sne     d1
+    btst    #5, d7
+    sne     d2
+    cmp.b   d1, d2
+    bne.w   cell_blank
     lea     S2_STORE, a1
     adda.w  d0, a1
     move.w  2(a1), r_attr
@@ -282,7 +317,7 @@ render_cell:
     move.w  d0, d1
     andi.w  #0x60, d1
     lsl.w   #6, d1
-    ori.w   #0xc000, d1
+    ori.w   #0xe000, d1
     or.w    d1, d5
     moveq   #0, d2
     btst    #5, d0
@@ -411,9 +446,29 @@ update_scroll2:
     beq.w   full_redraw
     tst.w   s2_full
     bne.w   full_redraw
-    cmp.w   s2_row0, d1
+    tst.w   s2_refresh
+    beq.s   6f
+    clr.w   s2_refresh
+    clr.w   dirty_count
+    bra.w   render_window
+6:  move.w  d1, d2
+    sub.w   s2_row0, d2
+    andi.w  #63, d2
+    beq.s   8f
+    cmpi.w  #1, d2
+    bne.s   7f
+    move.w  s2_row0, d3
+    addi.w  #16, d3
+    move.w  d1, s2_row0
+    bsr.w   render_row
+    bra.w   update_scroll2
+7:  cmpi.w  #63, d2
     bne.w   full_redraw
-    move.w  d0, d2
+    move.w  d1, s2_row0
+    move.w  d1, d3
+    bsr.w   render_row
+    bra.w   update_scroll2
+8:  move.w  d0, d2
     sub.w   s2_col0, d2
     andi.w  #63, d2
     beq.w   process_dirty
@@ -453,19 +508,28 @@ backward:
     bsr.w   clear_column
     subq.w  #1, u_count
     bpl.s   2b
-    bra.s   process_dirty
+    bra.w   process_dirty
 
+| The window jumped: every slot is released first, so until the cells are drawn
+| again they would show other tiles. The display is off meanwhile.
 full_redraw:
     move.w  d0, s2_col0
     move.w  d1, s2_row0
     move.w  #1, s2_valid
     clr.w   s2_full
+    clr.w   s2_refresh
     clr.w   dirty_count
+    move.w  #0x8134, VDP_CTRL
     move.w  #31, u_count
 5:  move.w  u_count, d3
     bsr.w   clear_column
     subq.w  #1, u_count
     bpl.s   5b
+    bsr.s   render_window
+    move.w  #0x8174, VDP_CTRL
+    rts
+
+render_window:
     move.w  #S2_W - 1, u_count
 3:  move.w  s2_col0, d3
     add.w   u_count, d3
@@ -473,7 +537,21 @@ full_redraw:
     bsr.w   render_column
     subq.w  #1, u_count
     bpl.s   3b
-    bra.s   scan_palette
+    rts
+
+| d3 arcade row: draws its cells across the window
+render_row:
+    andi.w  #63, d3
+    move.w  d3, r_row
+    move.w  #S2_W - 1, u_count
+1:  move.w  s2_col0, d0
+    add.w   u_count, d0
+    andi.w  #63, d0
+    move.w  d0, r_col
+    bsr.w   render_cell
+    subq.w  #1, u_count
+    bpl.s   1b
+    rts
 
 process_dirty:
     move.w  dirty_count, d0
@@ -496,47 +574,7 @@ process_dirty:
 
 | Every 32 frames: the most used playfield palette on screen goes to CRAM line 2.
 scan_palette:
-    move.l  hal_frames, d0
-    andi.w  #31, d0
-    bne.s   9f
-    lea     S2_PAL_COUNT, a0
-    moveq   #15, d0
-5:  clr.l   (a0)+
-    dbra    d0, 5b
-    lea     S2_PAL_COUNT, a0
-    lea     S2_STORE + 2, a1
-    move.w  s2_col0, d6
-    addq.w  #1, d6
-    moveq   #10, d5
-6:  move.w  s2_row0, d7
-    moveq   #7, d4
-7:  move.w  d6, d0
-    andi.w  #63, d0
-    lsl.w   #5, d0
-    move.w  d7, d1
-    andi.w  #31, d1
-    or.w    d1, d0
-    lsl.w   #2, d0
-    move.w  0(a1,d0.w), d0
-    andi.w  #31, d0
-    add.w   d0, d0
-    addq.w  #1, 0(a0,d0.w)
-    addq.w  #2, d7
-    dbra    d4, 7b
-    addq.w  #2, d6
-    dbra    d5, 6b
-    moveq   #0, d1
-    moveq   #0, d2
-    moveq   #31, d0
-8:  move.w  (a0)+, d3
-    cmp.w   d1, d3
-    bls.s   10f
-    move.w  d3, d1
-    moveq   #31, d2
-    sub.w   d0, d2
-10: dbra    d0, 8b
-    move.w  d2, s2_pal
-9:  rts
+    rts
 
 | ---------------------------------------------------------------- store access
 
@@ -567,21 +605,77 @@ s2_offset:
     move.w  (sp)+, d2
     rts
 
+| The store folds the map's 64 rows onto 32. The game fills the unused half of
+| each column with a blank tile, so each cell remembers which half its tile came
+| from: a blank written to the other half is dropped, a tile takes the cell over,
+| and the other half reads back as empty.
+
+| d4 store offset, d3 row -> EQ if the cell holds that row's half; a1 tag byte, d4 bit
+s2_half:
+    lsr.w   #2, d4
+    move.w  d4, d2
+    lsr.w   #3, d2
+    lea     S2_HALF, a1
+    adda.w  d2, a1
+    andi.w  #7, d4
+    btst    d4, (a1)
+    sne     d2
+    btst    #5, d3
+    sne     d3
+    cmp.b   d2, d3
+    rts
+
 | d0 address -> d1 word
 s2_read:
-    movem.l d2-d4/a1, -(sp)
+    movem.l d2-d5/a1, -(sp)
     bsr.s   s2_offset
-    lea     S2_STORE, a1
-    move.w  0(a1,d4.w), d1
-    movem.l (sp)+, d2-d4/a1
+    move.w  d4, d5
+    bsr.s   s2_half
+    beq.s   1f
+    moveq   #0, d1
+    bra.s   2f
+1:  lea     S2_STORE, a1
+    move.w  0(a1,d5.w), d1
+2:  movem.l (sp)+, d2-d5/a1
     rts
 
 | d0 address, d1 word
 s2_write:
-    movem.l d2-d4/a1, -(sp)
-    bsr.s   s2_offset
+    movem.l d2-d5/a1, -(sp)
+    bsr.w   s2_offset
+    move.w  d4, d5
+    movem.w d2-d3, -(sp)
+    bsr.s   s2_half
+    beq.s   0f
+    btst    #1, d5
+    bne.w   8f
+    tst.w   d1
+    bmi.w   8f
+    lea     TILE_FLAGS, a1
+    tst.b   0(a1,d1.w)
+    beq.w   8f
+    move.w  d5, d2
+    lsr.w   #5, d2
+    lea     S2_HALF, a1
+    bchg    d4, 0(a1,d2.w)
+0:  movem.w (sp)+, d2-d3
+    move.w  d5, d4
     lea     S2_STORE, a1
     move.w  d1, 0(a1,d4.w)
+    btst    #1, d4
+    beq.s   7f
+    move.w  -2(a1,d4.w), d5
+    bmi.s   7f
+    lea     TILE_FLAGS, a1
+    tst.b   0(a1,d5.w)
+    beq.s   7f
+    move.w  d1, d5
+    andi.w  #31, d5
+    lea     PM_INDEX, a1
+    cmpi.b  #0xff, 0(a1,d5.w)
+    bne.s   7f
+    move.w  #1, q_request
+7:
     tst.w   s2_valid
     beq.s   9f
     move.w  d2, d4
@@ -597,7 +691,7 @@ s2_write:
     move.w  dirty_count, d4
     cmpi.w  #64, d4
     blo.s   1f
-    move.w  #1, s2_full
+    move.w  #1, s2_refresh
     bra.s   9f
 1:  lsl.w   #8, d2
     or.w    d3, d2
@@ -607,8 +701,10 @@ s2_write:
     lsr.w   #1, d4
     addq.w  #1, d4
     move.w  d4, dirty_count
-9:  movem.l (sp)+, d2-d4/a1
+9:  movem.l (sp)+, d2-d5/a1
     rts
+8:  addq.l  #4, sp
+    bra.s   9b
 
 | d0 24-bit address in arcade video RAM -> d1 word
 gfx_read_w:
@@ -712,7 +808,11 @@ hal_fill:
 1:  move.w  d0, (a2)+
     move.w  d1, (a2)+
     dbra    d3, 1b
-    move.w  #1, s2_full
+    lea     S2_HALF, a2
+    moveq   #63, d3
+7:  clr.l   (a2)+
+    dbra    d3, 7b
+    move.w  #1, s2_refresh
     bra.s   2f
 5:  cmpi.l  #S3_BASE, d2
     bne.s   2f
@@ -721,7 +821,7 @@ hal_fill:
 6:  move.w  d0, (a2)+
     move.w  d1, (a2)+
     dbra    d3, 6b
-    move.w  #1, s3_full
+    move.w  #1, s3_refresh
 2:  movea.l a1, a0
     bra.s   4f
 3:  move.w  d0, (a0)+

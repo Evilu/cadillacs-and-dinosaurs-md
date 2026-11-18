@@ -156,6 +156,7 @@ hal_vblank:
     jmp     ARCADE_VBLANK
 hal_after:
     bsr.w   build_sprites
+    bsr.w   bgpal_update
     bsr.w   update_scroll2
     bsr.w   update_scroll3
     bsr.w   build_cram
@@ -538,10 +539,10 @@ count_palettes:
     dbra    d7, 2b
 3:  rts
 
-| Sprites get lines 0 and 1; line 2 belongs to the playfield, line 3 to the far background.
-| A line keeps its palette while that palette is on screen, unless another covers more
-| than twice its area; the players' palettes (0 to 2) always win. Palettes without a line
-| use the line whose colours are closest.
+| Sprites get lines 0 to 2; line 3 belongs to the backgrounds (bgpal.s). A line keeps
+| its palette while that palette is on screen, unless another covers more than twice
+| its area; the players' palettes (0 to 2) always win. Palettes without a line use the
+| line whose colours are closest.
 assign_lines:
     movem.l d0-d7/a0-a5, -(sp)
     lea     PAL_COUNT, a1
@@ -553,8 +554,8 @@ assign_lines:
     dbra    d0, 0b
     lea     PAL_COUNT, a1
     lea     line_pal, a3
-    move.w  (a3), -(sp)
-    moveq   #1, d3
+    move.l  (a3), -(sp)
+    moveq   #2, d3
 1:  moveq   #0, d0
     move.b  0(a3,d3.w), d0
     cmpi.b  #0xff, d0
@@ -564,13 +565,15 @@ assign_lines:
     bne.s   2f
     move.b  #0xff, 0(a3,d3.w)
 2:  dbra    d3, 1b
-    moveq   #1, d7
+    moveq   #2, d7
 3:  moveq   #0, d1
     moveq   #-1, d2
     moveq   #0, d0
 4:  cmp.b   (a3), d0
     beq.s   5f
     cmp.b   1(a3), d0
+    beq.s   5f
+    cmp.b   2(a3), d0
     beq.s   5f
     move.w  d0, d4
     add.w   d4, d4
@@ -585,73 +588,70 @@ assign_lines:
     tst.w   d2
     bmi.s   9f
     moveq   #0, d3
-    cmpi.b  #0xff, (a3)
+6:  cmpi.b  #0xff, 0(a3,d3.w)
     beq.s   8f
-    moveq   #1, d3
-    cmpi.b  #0xff, 1(a3)
-    beq.s   8f
-    moveq   #0, d0
-    move.b  (a3), d0
-    add.w   d0, d0
-    move.w  0(a1,d0.w), d4
-    moveq   #0, d0
-    move.b  1(a3), d0
+    addq.w  #1, d3
+    cmpi.w  #3, d3
+    blt.s   6b
+    move.w  #0xffff, d4
+    moveq   #0, d6
+7:  moveq   #0, d0
+    move.b  0(a3,d6.w), d0
     add.w   d0, d0
     move.w  0(a1,d0.w), d5
-    moveq   #0, d3
     cmp.w   d4, d5
-    bcc.s   7f
-    moveq   #1, d3
+    bcc.s   17f
     move.w  d5, d4
-7:  add.w   d4, d4
+    move.w  d6, d3
+17: addq.w  #1, d6
+    cmpi.w  #3, d6
+    blt.s   7b
+    add.w   d4, d4
+    bcs.s   9f
     cmp.w   d4, d1
     bls.s   9f
 8:  move.b  d2, 0(a3,d3.w)
     dbra    d7, 3b
-9:  move.w  (sp)+, d0
-    cmp.w   (a3), d0
+9:  move.l  (sp)+, d0
+    cmp.l   (a3), d0
     beq.s   10f
     clr.l   pal_known
 10: lea     pal_line, a5
     moveq   #0, d3
-11: cmp.b   (a3), d3
-    bne.s   12f
-    clr.b   (a5)
-    bra.s   15f
-12: cmp.b   1(a3), d3
+11: moveq   #2, d4
+12: cmp.b   0(a3,d4.w), d3
     bne.s   13f
-    move.b  #1, (a5)
-    bra.s   15f
-13: move.w  d3, d0
+    move.b  d4, (a5)
+    bra.s   16f
+13: dbra    d4, 12b
+    move.w  d3, d0
     add.w   d0, d0
     tst.w   0(a1,d0.w)
-    beq.s   14f
+    beq.s   15f
     move.l  pal_known, d0
     btst    d3, d0
-    bne.s   15f
+    bne.s   16f
     bset    d3, d0
     move.l  d0, pal_known
     clr.b   (a5)
-    cmpi.b  #0xff, (a3)
-    beq.s   15f
-    cmpi.b  #0xff, 1(a3)
-    beq.s   15f
-    moveq   #0, d0
-    move.b  (a3), d0
-    bsr.s   pal_distance
-    move.w  d0, d5
-    moveq   #0, d0
-    move.b  1(a3), d0
+    move.w  #0x7fff, d5
+    moveq   #2, d4
+14: moveq   #0, d0
+    move.b  0(a3,d4.w), d0
+    cmpi.b  #0xff, d0
+    beq.s   18f
     bsr.s   pal_distance
     cmp.w   d5, d0
-    bcc.s   15f
-    move.b  #1, (a5)
-    bra.s   15f
-14: move.l  pal_known, d0
+    bhs.s   18f
+    move.w  d0, d5
+    move.b  d4, (a5)
+18: dbra    d4, 14b
+    bra.s   16f
+15: move.l  pal_known, d0
     bclr    d3, d0
     move.l  d0, pal_known
     clr.b   (a5)
-15: addq.l  #1, a5
+16: addq.l  #1, a5
     addq.w  #1, d3
     cmpi.w  #32, d3
     blt.s   11b
@@ -660,6 +660,7 @@ assign_lines:
 
 | d3 arcade sprite palette, d0 another -> d0 sum of RGB nibble differences
 pal_distance:
+    movem.l d1-d2/d4-d7/a2/a4, -(sp)
     lsl.w   #5, d0
     lea     PALETTES, a2
     lea     0(a2,d0.w), a4
@@ -683,6 +684,7 @@ pal_distance:
     lsr.w   #4, d6
     dbra    d2, 2b
     dbra    d7, 1b
+    movem.l (sp)+, d1-d2/d4-d7/a2/a4
     rts
 
 | Converts only the colours whose arcade value changed since the last frame.
@@ -696,19 +698,19 @@ build_cram:
     addq.l  #2, a5
     moveq   #0, d0
     move.b  (a3)+, d0
-    cmpi.w  #1, d7
-    bne.s   9f
-    move.w  s2_pal, d0
-    lsl.w   #5, d0
-    lea     PALETTES + 0x800, a2
-    adda.w  d0, a2
-    bra.s   7f
-9:  tst.w   d7
+    tst.w   d7
     bne.s   6f
-    move.w  s3_pal, d0
-    lsl.w   #5, d0
-    lea     PALETTES + 0xc00, a2
-    adda.w  d0, a2
+    lea     LINE_SRC, a0
+    lea     LINE_RAW, a2
+    lea     PALETTES, a6
+    moveq   #14, d6
+9:  move.w  (a0)+, d0
+    bmi.s   10f
+    move.w  0(a6,d0.w), (a2)+
+    bra.s   11f
+10: clr.w   (a2)+
+11: dbra    d6, 9b
+    lea     LINE_RAW, a2
     bra.s   7f
 6:  tst.b   d0
     bmi.s   4f
@@ -810,4 +812,5 @@ vdp_init:
 vdp_init_end:
 
     .include "background.s"
+    .include "bgpal.s"
     .include "farbg.s"
