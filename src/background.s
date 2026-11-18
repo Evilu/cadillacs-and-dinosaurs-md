@@ -41,6 +41,8 @@
     .equ cam2_x,        BG_VARS + 26
     .equ cam2_y,        BG_VARS + 28
     .equ r_attr,        BG_VARS + 24
+    .equ s2_fill_code,  BG_VARS + 32    | what the game last filled the whole map with
+    .equ s2_fill_attr,  BG_VARS + 34
     .equ s2_refresh,    BG_VARS + 30    | redraw every cell of the window in place
     .equ ARCADE_FILL_END, 0x000ba8
     .equ PATCH_HASH,    0x198000    | 1024 words: offset of the entry for (pc >> 1) & 1023, 0xffff empty
@@ -68,6 +70,7 @@ bg_init:
     clr.w   dirty_count
     clr.w   s2_valid
     clr.w   s2_full
+    move.w  #0xffff, s2_fill_code
     bsr.w   bgpal_init
     bra.w   s3_init
 
@@ -281,11 +284,15 @@ render_cell:
     btst    #5, d7
     sne     d2
     cmp.b   d1, d2
-    bne.w   cell_blank
-    lea     S2_STORE, a1
+    beq.s   13f
+    move.w  s2_fill_attr, r_attr
+    move.w  s2_fill_code, d0
+    bra.s   14f
+13: lea     S2_STORE, a1
     adda.w  d0, a1
     move.w  2(a1), r_attr
     move.w  (a1), d0
+14: tst.w   d0
     bmi.w   cell_blank
     lea     TILE_FLAGS, a1
     move.b  0(a1,d0.w), d1
@@ -605,10 +612,10 @@ s2_offset:
     move.w  (sp)+, d2
     rts
 
-| The store folds the map's 64 rows onto 32. The game fills the unused half of
-| each column with a blank tile, so each cell remembers which half its tile came
-| from: a blank written to the other half is dropped, a tile takes the cell over,
-| and the other half reads back as empty.
+| The store folds the map's 64 rows onto 32. The game fills the whole map with
+| one tile and then draws on part of it, so each cell remembers which half its
+| tile came from: the fill tile or a blank written to the other half is dropped,
+| another tile takes the cell over, and the other half reads back as the fill.
 
 | d4 store offset, d3 row -> EQ if the cell holds that row's half; a1 tag byte, d4 bit
 s2_half:
@@ -632,7 +639,10 @@ s2_read:
     move.w  d4, d5
     bsr.s   s2_half
     beq.s   1f
-    moveq   #0, d1
+    move.w  s2_fill_code, d1
+    btst    #1, d5
+    beq.s   2f
+    move.w  s2_fill_attr, d1
     bra.s   2f
 1:  lea     S2_STORE, a1
     move.w  0(a1,d5.w), d1
@@ -651,6 +661,8 @@ s2_write:
     bne.w   8f
     tst.w   d1
     bmi.w   8f
+    cmp.w   s2_fill_code, d1
+    beq.w   8f
     lea     TILE_FLAGS, a1
     tst.b   0(a1,d1.w)
     beq.w   8f
@@ -803,6 +815,8 @@ hal_fill:
     bhs.s   3f
     cmpi.l  #S2_BASE, d2
     bne.s   5f
+    move.w  d0, s2_fill_code
+    move.w  d1, s2_fill_attr
     lea     S2_STORE, a2
     move.w  #2047, d3
 1:  move.w  d0, (a2)+

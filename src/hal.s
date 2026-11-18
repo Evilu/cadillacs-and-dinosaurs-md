@@ -417,8 +417,9 @@ emit_piece:
     bne.s   2f
     ori.w   #0x8000, d5
 2:  move.w  d5, d4
-    lsr.w   #5, d4
+    lsr.w   #4, d4
     eor.w   d5, d4
+    lsr.w   #1, d4
     andi.w  #15, d4
     lsl.w   #3, d4
     lea     CACHE_KEY, a3
@@ -431,24 +432,35 @@ emit_piece:
     beq.w   hit
     cmp.w   (a3)+, d5
     beq.w   hit
+    addq.w  #8, d4
+    andi.w  #0x78, d4
+    lea     CACHE_KEY, a3
+    adda.w  d4, a3
+    cmp.w   (a3)+, d5
+    beq.w   hit
+    cmp.w   (a3)+, d5
+    beq.w   hit
+    cmp.w   (a3)+, d5
+    beq.w   hit
+    cmp.w   (a3)+, d5
+    beq.w   hit
     cmpi.w  #MAX_QUEUE, queue_count
     bhs.w   8f
-    subq.l  #8, a3
-    move.w  stamp, d4
-    cmp.w   0x100(a3), d4
+    move.w  stamp, d1
+    subq.w  #8, d4
+    andi.w  #0x78, d4
+    lea     CACHE_KEY, a3
+    adda.w  d4, a3
+    bsr.w   free_way
     bne.s   3f
-    addq.l  #2, a3
-    cmp.w   0x100(a3), d4
-    bne.s   3f
-    addq.l  #2, a3
-    cmp.w   0x100(a3), d4
-    bne.s   3f
-    addq.l  #2, a3
-    cmp.w   0x100(a3), d4
-    bne.s   3f
-    bra.w   8f
+    addq.w  #8, d4
+    andi.w  #0x78, d4
+    lea     CACHE_KEY, a3
+    adda.w  d4, a3
+    bsr.w   free_way
+    beq.w   8f
 3:  move.w  d5, (a3)
-    move.w  d4, 0x100(a3)
+    move.w  d1, 0x100(a3)
     move.l  a3, d4
     subi.l  #CACHE_KEY, d4
     lsl.w   #2, d4
@@ -497,6 +509,20 @@ write_sat:
     move.w  d1, sat_count
 8:  movem.l (sp)+, d4-d5
 9:  rts
+
+| a3 cache set, d1 stamp -> NE and a3 on a way not used this frame, or EQ
+free_way:
+    cmp.w   0x100(a3), d1
+    bne.s   1f
+    addq.l  #2, a3
+    cmp.w   0x100(a3), d1
+    bne.s   1f
+    addq.l  #2, a3
+    cmp.w   0x100(a3), d1
+    bne.s   1f
+    addq.l  #2, a3
+    cmp.w   0x100(a3), d1
+1:  rts
 
 | a3 cache key entry -> d4 first VRAM pattern of its slot
 slot_pattern:
