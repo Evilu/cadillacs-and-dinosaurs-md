@@ -64,7 +64,7 @@ Everything here was seen or measured in stage 1 under scripted play in MAME. Lat
 - The logo and the select portraits overlap for a moment between the title and select screens.
 - Barrels sometimes lose pieces or show green stripes.
 - When the tile caches run out, a few background cells can stay blank for up to a second.
-- The jungle scene of the attract-mode demo needs about 190 different playfield tiles; the cache holds 160, so a block of cells on the right stays black while it is on screen. Seen in MAME only; no other stage has been played.
+- The jungle scene of the attract-mode demo needs about 190 different playfield tiles; the cache holds 160. Cells without a slot draw a neighbouring cell's tile until a slot frees up, so a few cells show the wrong tile for a while. Seen in MAME only; no other stage has been played.
 
 **Hardware**
 - Never run on a real console or flash cart. Do not try yet: some code paths still touch arcade addresses that a real Mega Drive may not tolerate.
