@@ -20,7 +20,12 @@
     .equ line_pal,      HAL_VARS + 28   | 4 bytes: arcade sprite palette shown in each CRAM line
     .equ pal_line,      HAL_VARS + 32   | 32 bytes: CRAM line used for each arcade sprite palette
     .equ pal_known,     HAL_VARS + 68   | bit p: pal_line[p] chosen for the current lines
-    .equ last_flag,     HAL_VARS + 64   | SHOWN_FLAG when the sprite table was last built
+    .equ last_flag,     HAL_VARS + 64   | SHOWN_FLAG at the last VBlank
+    .equ list_dirty,    HAL_VARS + 72   | the game showed a new list since the last conversion
+    .equ conv_wait,     HAL_VARS + 74   | frames since the last conversion
+    .equ conv_gap,      HAL_VARS + 76   | least frames between conversions: 2, or 3 when the game falls behind
+    .equ flips,         HAL_VARS + 78   | lists shown in the current 32-frame window
+    .equ conv_count,    HAL_VARS + 80
     .equ ent_left,      HAL_VARS + 66
     .equ RAW_CACHE,     0xff1920    | arcade colour last converted for each CRAM entry
 
@@ -129,6 +134,7 @@ hal_post_reset:
     dbra    d1, 1b
     move.l  d0, line_pal
     move.w  d0, last_flag
+    move.w  #2, conv_gap
     bsr.w   bg_init
     move.w  #0x8174, VDP_CTRL
     jmp     ARCADE_START
@@ -239,15 +245,43 @@ dma_to_vram:
 
 | ---------------------------------------------------------------- sprites
 
-| Runs on even frames only, from whichever list the game shows: the 68000 cannot
-| convert the list 60 times a second alongside the game. Palette lines are
+| Runs when the game has shown a new list, at most every second frame: the 68000
+| cannot convert the list 60 times a second alongside the game. When the game
+| shows fewer than 24 lists in 32 frames the gap grows to three frames, and goes
+| back to two once it shows 30. Palette lines are
 | reassigned every 8 frames.
 build_sprites:
-    move.l  hal_frames, d1
-    btst    #0, d1
+    addq.w  #1, conv_wait
+    move.w  SHOWN_FLAG, d0
+    cmp.w   last_flag, d0
+    beq.s   0f
+    move.w  d0, last_flag
+    move.w  #1, list_dirty
+    addq.w  #1, flips
+0:  move.l  hal_frames, d1
+    andi.w  #31, d1
+    bne.s   2f
+    moveq   #2, d1
+    cmpi.w  #24, flips
+    bhs.s   5f
+    moveq   #3, d1
+5:  cmpi.w  #30, flips
+    bhs.s   6f
+    cmp.w   conv_gap, d1
+    bhs.s   6f
+    move.w  conv_gap, d1
+6:  move.w  d1, conv_gap
+    clr.w   flips
+2:  tst.w   list_dirty
     beq.s   1f
-    rts
-1:  move.w  SHOWN_FLAG, d0
+    move.w  conv_wait, d1
+    cmp.w   conv_gap, d1
+    bhs.s   7f
+1:  rts
+7:  clr.w   conv_wait
+    clr.w   list_dirty
+    addq.w  #2, conv_count
+    move.w  conv_count, d1
     addq.w  #1, stamp
     lea     SPRITES_A, a0
     tst.w   d0

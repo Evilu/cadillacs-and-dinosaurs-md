@@ -40,6 +40,7 @@
     .equ s3_rel_y,      S3_VARS + 98
     .equ s3_last_y,     S3_VARS + 100
     .equ t_pal,         S3_VARS + 102
+    .equ s3_dirty_cols, S3_VARS + 104
     .equ TILE_FLAGS3,   0x1a0000    | per 32 x 32 tile code 0-0x1fff: nonzero if it has pixels
     .equ TILE3_DATA,    TILE_DATA   | 32 x 32 tile c: 16 patterns (column-major) at TILE3_DATA + c * 512
 
@@ -329,7 +330,10 @@ render_cell3:
     bsr.w   s3_acquire
     movea.l (sp)+, a0
     tst.w   d5
-    bmi.s   3f
+    bpl.s   30f
+    move.w  #S3_W, s3_pending
+    bra.s   3f
+30:
     move.b  d5, (a0)
     add.w   d5, d5
     lea     s3_slot_pat(pc), a1
@@ -446,6 +450,7 @@ update_scroll3:
     beq.s   21f
     clr.w   s3_refresh
     clr.w   s3_dirty
+    clr.w   s3_dirty_cols
     bsr.w   render_window3
     bra.w   6f
 21: move.w  d1, d2
@@ -562,7 +567,24 @@ render_row3:
     bsr.w   render_cell3
     subq.w  #1, s3_count
     bpl.s   8b
-6:  move.w  cam2_x, d0
+6:  move.w  s3_dirty_cols, d0
+    beq.s   25f
+    clr.w   s3_dirty_cols
+    move.w  d0, -(sp)
+    move.w  #S3_W - 1, s3_count
+24: move.w  s3_col0, d3
+    add.w   s3_count, d3
+    andi.w  #63, d3
+    move.w  d3, d1
+    andi.w  #15, d1
+    move.w  (sp), d0
+    btst    d1, d0
+    beq.s   26f
+    bsr.w   render_column3
+26: subq.w  #1, s3_count
+    bpl.s   24b
+    addq.l  #2, sp
+25: move.w  cam2_x, d0
     sub.w   cam3_x, d0
     move.w  cam2_y, d1
     sub.w   cam3_y, d1
@@ -670,7 +692,10 @@ s3_write:
     move.w  s3_dirty, d4
     cmpi.w  #32, d4
     blo.s   1f
-    move.w  #1, s3_refresh
+    andi.w  #15, d2
+    move.w  s3_dirty_cols, d4
+    bset    d2, d4
+    move.w  d4, s3_dirty_cols
     bra.s   9f
 1:  lsl.w   #8, d2
     or.w    d3, d2

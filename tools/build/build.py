@@ -59,6 +59,11 @@ FAST_PATHS = [
     (0x020564, '20db20db41e8003820db20db', 9),
     (0x0205ac, '20d951ccfffc', 10),
 ]
+INLINE_PATCHES = [
+    (0x00cc96, '7a1f22d851cdfffc', '41e8008043e90080', None),
+    (0x0130e4, '41f90090c00034302002', '4eb9{:08x}4e714e71', 'hal_attr'),
+    (0x01366a, '41f90090c00034302002', '4eb9{:08x}4e714e71', 'hal_attr'),
+]
 FAST_PATH_HANDLERS = {9: 'trap_meta', 10: 'trap_copy', 11: 'trap_fill'}
 SKIPPED_ROUTINES = [
     (0x00a7b8, '207c00918000', 'fills 0x918000, a table the port drops'),
@@ -162,11 +167,16 @@ def apply_fast_paths(rom, sym, report):
         assert rom[addr:addr + length].hex() == original, f'unexpected code at {addr:06x}'
         rom[addr:addr + length] = struct.pack('>H', 0x4e40 | trap) + struct.pack('>H', NOP) * (length // 2 - 1)
         covered.append((addr, addr + length))
+    for addr, original, new, symbol in INLINE_PATCHES:
+        length = len(original) // 2
+        assert rom[addr:addr + length].hex() == original, f'unexpected code at {addr:06x}'
+        rom[addr:addr + length] = bytes.fromhex(new.format(sym[symbol]) if symbol else new)
+        covered.append((addr, addr + length))
     for addr, original, _ in SKIPPED_ROUTINES:
         assert rom[addr:addr + len(original) // 2].hex() == original, f'unexpected code at {addr:06x}'
         rom[addr:addr + 2] = b'\x4e\x75'
         covered.append((addr, addr + 0x42))
-    report.append(f'{len(FAST_PATHS)} tilemap routines replaced by fast paths, {len(SKIPPED_ROUTINES)} skipped')
+    report.append(f'{len(FAST_PATHS)} tilemap routines replaced by fast paths, {len(INLINE_PATCHES)} patched in place, {len(SKIPPED_ROUTINES)} skipped')
     return covered
 
 

@@ -5,8 +5,8 @@
 | bg_quantise counts the palettes in both map stores, lists their distinct
 | colours (to Mega Drive precision), picks 15 by repeatedly taking the colour
 | whose distance to the ones already picked, times its use, is largest, and
-| writes a 16-byte pen map per arcade palette. The three most used palettes also
-| get a 256-entry table that converts two pixels at a time. It runs when a tile
+| writes a 16-byte pen map per arcade palette. Tiles are converted two pixels at
+| a time through 256-entry tables, kept for three palettes at once. It runs when a tile
 | arrives in a palette without a map, or when a mapped palette's colours change,
 | and both layers are then redrawn. A colour that stays in the line keeps its
 | position, so tiles drawn before and after look the same while the redraw,
@@ -21,6 +21,7 @@
     .equ q_request,     0xff7b64
     .equ q_n,           0xff7b66
     .equ q_sig,         0xff7b68
+    .equ lut_next,      0xff7b6c
     .equ QCOUNT,        0xff7b70    | 64 words: cells per palette
     .equ LUTS,          0xff7c00    | 3 x 256 bytes
     .equ QW,            LUTS        | work list while quantising, 8 bytes per colour: key, weight, source, distance
@@ -47,7 +48,8 @@ bgpal_init:
     clr.l   q_sig
     rts
 
-| a3 source patterns, d2 words - 1, d1 page index (playfield 0-31, far 32-63); VRAM address set
+| a3 source patterns, d2 words - 1, d1 page index (playfield 0-31, far 32-63); VRAM address set.
+| A palette without a pair table gets one, in place of the oldest.
 remap_copy:
     lea     PM_INDEX, a1
     moveq   #0, d0
@@ -56,40 +58,47 @@ remap_copy:
     bne.s   1f
     move.w  #1, q_request
     moveq   #0, d0
-1:  lea     VDP_DATA, a4
-    lea     LUT_PAL, a1
-    moveq   #3, d3
+1:  lea     LUT_PAL, a1
+    moveq   #2, d3
 2:  cmp.b   (a1)+, d0
     beq.s   5f
     dbra    d3, 2b
+    movem.l d2/a2-a3, -(sp)
+    move.w  lut_next, d3
+    addq.w  #1, d3
+    cmpi.w  #3, d3
+    blo.s   3f
+    moveq   #0, d3
+3:  move.w  d3, lut_next
+    lea     LUT_PAL, a1
+    move.b  d0, 0(a1,d3.w)
     lsl.w   #4, d0
     lea     PENMAP, a1
     adda.w  d0, a1
-    moveq   #0, d0
-3:  move.b  (a3)+, d0
-    move.w  d0, d3
-    lsr.w   #4, d3
-    andi.w  #15, d0
-    move.b  0(a1,d3.w), d1
-    lsl.w   #4, d1
-    or.b    0(a1,d0.w), d1
-    lsl.w   #8, d1
-    move.b  (a3)+, d0
-    move.w  d0, d3
-    lsr.w   #4, d3
-    andi.w  #15, d0
-    move.b  0(a1,d3.w), d4
+    lsl.w   #8, d3
+    lea     LUTS, a2
+    adda.w  d3, a2
+    moveq   #0, d1
+4:  move.b  0(a1,d1.w), d4
     lsl.b   #4, d4
-    or.b    0(a1,d0.w), d4
-    move.b  d4, d1
-    move.w  d1, (a4)
-    dbra    d2, 3b
-    rts
-5:  moveq   #3, d0
+    movea.l a1, a3
+    moveq   #15, d2
+7:  move.b  (a3)+, d0
+    or.b    d4, d0
+    move.b  d0, (a2)+
+    dbra    d2, 7b
+    addq.w  #1, d1
+    cmpi.w  #16, d1
+    blt.s   4b
+    lea     -256(a2), a1
+    movem.l (sp)+, d2/a2-a3
+    bra.s   8f
+5:  moveq   #2, d0
     sub.w   d3, d0
     lsl.w   #8, d0
     lea     LUTS, a1
     adda.w  d0, a1
+8:  lea     VDP_DATA, a4
     moveq   #0, d0
 6:  move.b  (a3)+, d0
     move.b  0(a1,d0.w), d1
@@ -103,13 +112,10 @@ remap_copy:
 | Called every frame before the layers are drawn
 bgpal_update:
     move.l  hal_frames, d0
-    andi.w  #7, d0
+    andi.w  #31, d0
     bne.s   9f
     tst.w   q_request
     bne.s   bg_quantise
-    move.l  hal_frames, d0
-    andi.w  #31, d0
-    bne.s   9f
     bsr.w   q_signature
     cmp.l   q_sig, d0
     bne.s   bg_quantise

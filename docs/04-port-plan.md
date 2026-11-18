@@ -145,6 +145,18 @@ The instruction budget is the hard constraint. The Mega Drive's 68000 executes a
 - palette colours are converted only when their arcade value changes;
 - trap lookups use a hash table.
 
+**Speed pass** (PC sampled about 160 times a frame over four windows of scripted play, before and after):
+
+- **Tile hash.** With 256 entries and a shift-and-xor hash, the consecutive tile codes of a scene formed long runs: `hash_delete` took 6–9% of the CPU while scenes loaded. A multiplicative hash (code × 40503, plus the palette) removed it from the profile.
+- **Pair tables on demand.** Tiles in palettes without a 256-byte table were converted a nibble at a time; a palette now takes over the oldest of the three tables when it needs one.
+- **Three game instructions patched in place.** In fights, `TRAP #8` fired about 17 times a frame from three sites: the two collision routines' attribute reads (`0x130EA`, `0x13670`), now a call to a short routine, and a 32-long copy loop into the text layer (`0xCC98`), now two address increments until that layer is drawn.
+- **Sprite list conversion follows the game.** It runs only when the game has shown a new list. If the game shows fewer than 24 lists in 32 frames, the gap between conversions grows from two frames to three, and returns to two when it shows 30.
+- **Change-list overflow redraws columns, not the window.** While a scene is drawn, more than 64 cells change per frame.
+- **Cells that get no slot are retried.** In the opening pan the playfield cache runs out (0 of 128 free); the cells stayed blank until redrawn. They now go back on the change list and fill in within about 40 frames.
+- **The palette check runs every 32 frames** instead of 8.
+
+Sprite lists finished per second, same script: opening 20–31 → 44–64; first fights 43–51 → 49–58; later play 56–59 → 59–60. The select screen still stalls while it loads (24–51 of 60 VBlanks handled): the game draws it in bursts and each new palette triggers the reduction and a window redraw.
+
 Still to do:
 
 - The text layer (scroll 1) in the window: the HUD, and all the text and player panels of the title and select screens. Its writes are currently dropped. VRAM and the hardware layer's RAM are both full, so it needs room made first.

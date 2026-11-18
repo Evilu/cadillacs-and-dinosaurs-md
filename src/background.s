@@ -43,6 +43,7 @@
     .equ r_attr,        BG_VARS + 24
     .equ s2_fill_code,  BG_VARS + 32    | what the game last filled the whole map with
     .equ s2_fill_attr,  BG_VARS + 34
+    .equ dirty_cols,    BG_VARS + 36    | bit per ring column with more changes than the list holds
     .equ s2_refresh,    BG_VARS + 30    | redraw every cell of the window in place
     .equ ARCADE_FILL_END, 0x000ba8
     .equ PATCH_HASH,    0x198000    | 1024 words: offset of the entry for (pc >> 1) & 1023, 0xffff empty
@@ -81,8 +82,9 @@ bg_init:
 | shadows by reusing a tile with a darker palette, and each needs its own pixels.
 hash_lookup:
     move.w  d0, d1
-    lsr.w   #7, d1
-    eor.w   d0, d1
+    mulu    #40503, d1
+    lsr.l   #8, d1
+    add.b   h_pal, d1
     andi.w  #255, d1
     lsl.w   #2, d1
     lea     HASH, a2
@@ -118,8 +120,9 @@ hash_delete:
     cmpi.w  #0xffff, d1
     beq.s   9f
     move.w  d1, d2
-    lsr.w   #7, d2
-    eor.w   d1, d2
+    mulu    #40503, d2
+    lsr.l   #8, d2
+    add.b   2(a2), d2
     andi.w  #255, d2
     lsl.w   #2, d2
     lea     HASH, a4
@@ -303,7 +306,24 @@ render_cell:
     move.w  (sp)+, d1
     movea.l (sp)+, a0
     tst.w   d5
-    bmi.w   cell_blank
+    bpl.s   15f
+    move.w  d6, d0
+    sub.w   s2_col0, d0
+    andi.w  #63, d0
+    cmpi.w  #S2_W, d0
+    bhi.w   cell_blank
+    move.w  dirty_count, d0
+    cmpi.w  #64, d0
+    bhs.w   cell_blank
+    add.w   d0, d0
+    lea     DIRTY, a1
+    move.w  d6, d1
+    lsl.w   #8, d1
+    or.w    d7, d1
+    move.w  d1, 0(a1,d0.w)
+    addq.w  #1, dirty_count
+    bra.w   cell_blank
+15:
     move.b  d5, (a0)
     btst    #1, d1
     beq.s   12f
@@ -457,6 +477,7 @@ update_scroll2:
     beq.s   6f
     clr.w   s2_refresh
     clr.w   dirty_count
+    clr.l   dirty_cols
     bra.w   render_window
 6:  move.w  d1, d2
     sub.w   s2_row0, d2
@@ -526,6 +547,7 @@ full_redraw:
     clr.w   s2_full
     clr.w   s2_refresh
     clr.w   dirty_count
+    clr.l   dirty_cols
     move.w  #0x8134, VDP_CTRL
     move.w  #31, u_count
 5:  move.w  u_count, d3
@@ -564,8 +586,8 @@ process_dirty:
     move.w  dirty_count, d0
     beq.s   scan_palette
     clr.w   dirty_count
-    subq.w  #1, d0
-    move.w  d0, u_count
+    move.w  d0, -(sp)
+    clr.w   u_count
 4:  move.w  u_count, d0
     add.w   d0, d0
     lea     DIRTY, a0
@@ -576,12 +598,30 @@ process_dirty:
     move.w  d0, r_col
     move.w  d1, r_row
     bsr.w   render_cell
-    subq.w  #1, u_count
-    bpl.s   4b
+    addq.w  #1, u_count
+    move.w  u_count, d0
+    cmp.w   (sp), d0
+    blo.s   4b
+    addq.l  #2, sp
 
 | Every 32 frames: the most used playfield palette on screen goes to CRAM line 2.
 scan_palette:
-    rts
+    move.l  dirty_cols, d0
+    beq.s   9f
+    clr.l   dirty_cols
+    move.l  d0, -(sp)
+    move.w  #S2_W - 1, u_count
+1:  move.w  s2_col0, d3
+    add.w   u_count, d3
+    andi.w  #63, d3
+    move.l  (sp), d0
+    btst    d3, d0
+    beq.s   2f
+    bsr.w   render_column
+2:  subq.w  #1, u_count
+    bpl.s   1b
+    addq.l  #4, sp
+9:  rts
 
 | ---------------------------------------------------------------- store access
 
@@ -703,7 +743,9 @@ s2_write:
     move.w  dirty_count, d4
     cmpi.w  #64, d4
     blo.s   1f
-    move.w  #1, s2_refresh
+    move.l  dirty_cols, d4
+    bset    d2, d4
+    move.l  d4, dirty_cols
     bra.s   9f
 1:  lsl.w   #8, d2
     or.w    d3, d2
@@ -717,6 +759,41 @@ s2_write:
     rts
 8:  addq.l  #4, sp
     bra.s   9b
+
+| Replaces "lea $90c000,a0 / move.w 2(a0,d2.w),d2" in the game's two collision
+| routines: d2 offset of a playfield cell -> d2 its attribute word. Runs on the
+| caller's stack, so it keeps to eight bytes.
+hal_attr:
+    movem.l d0-d1, -(sp)
+    move.w  d2, d0
+    lsr.w   #6, d0
+    andi.w  #63, d0
+    lsl.w   #5, d0
+    move.w  d2, d1
+    lsr.w   #2, d1
+    andi.w  #15, d1
+    or.w    d1, d0
+    btst    #12, d2
+    beq.s   1f
+    ori.w   #16, d0
+1:  move.w  d0, d1
+    lsr.w   #3, d1
+    lea     S2_HALF, a0
+    btst    d0, 0(a0,d1.w)
+    sne     d1
+    btst    #13, d2
+    sne     d2
+    cmp.b   d1, d2
+    bne.s   2f
+    lsl.w   #2, d0
+    lea     S2_STORE + 2, a0
+    move.w  0(a0,d0.w), d2
+    bra.s   3f
+2:  move.w  s2_fill_attr, d2
+3:  movem.l (sp)+, d0-d1
+    lea     S2_BASE, a0
+    tst.w   d2
+    rts
 
 | d0 24-bit address in arcade video RAM -> d1 word
 gfx_read_w:
