@@ -540,9 +540,17 @@ count_palettes:
 
 | Sprites get lines 0 and 1; line 2 belongs to the playfield, line 3 to the far background.
 | A line keeps its palette while that palette is on screen, unless another covers more
-| than twice its area. Palettes without a line use the line whose colours are closest.
+| than twice its area; the players' palettes (0 to 2) always win. Palettes without a line
+| use the line whose colours are closest.
 assign_lines:
     movem.l d0-d7/a0-a5, -(sp)
+    lea     PAL_COUNT, a1
+    moveq   #2, d0
+0:  tst.w   (a1)
+    beq.s   1f
+    ori.w   #0x4000, (a1)
+1:  addq.l  #2, a1
+    dbra    d0, 0b
     lea     PAL_COUNT, a1
     lea     line_pal, a3
     move.w  (a3), -(sp)

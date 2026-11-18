@@ -95,7 +95,7 @@ Measured in MAME over 100 seconds of attract mode and stage 1 (6,000 frames with
 Known problems:
 
 - **Per-line limits.** 30% of frames have a line with more than 320 sprite pixels or 20 sprites, where the VDP drops the pieces latest in the list. The title logo loses letters this way.
-- **Palettes.** Stage 1 shows 4 or 5 sprite palettes at once (11 RAM dumps) against two lines, so some sprites use the wrong colours. Picking the two busiest palettes every 8 frames made characters change colour as they moved: the lines swapped up to 66 times in 10 seconds of scripted play. Keeping each line's palette until it leaves the screen brought that to 0–4.
+- **Palettes.** Stage 1 shows 4 or 5 sprite palettes at once (11 RAM dumps) against two lines, so some sprites use the wrong colours. Picking the two busiest palettes every 8 frames made characters change colour as they moved: the lines swapped up to 66 times in 10 seconds of scripted play. Keeping each line's palette until it leaves the screen brought that to 0–4. The player's palette (0) covers less area than three enemy palettes at the start of stage 1 and never won a line, so palettes 0 to 2 now always win one; in a combo-and-dash test the player then held line 0 for all 440 frames and matches the arcade picture. Enemies beyond the one remaining line still show borrowed colours.
 - **VBlank can arrive late.** The arcade kernel raises the interrupt mask to level 6 to shut out its own level-2 VBlank; on the Mega Drive that also delays our level-6 VBlank, and in 2.5% of frames the uploads start after the picture has begun.
 
 Still to do in this milestone:
