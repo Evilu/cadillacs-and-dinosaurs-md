@@ -5,6 +5,10 @@
     .equ P3_SHADOW,     0xff1280    | arcade 0xf1c000-0xf1c01f
     .equ HAL_VARS,      0xff12c0
     .equ hal_frames,    HAL_VARS
+    .equ box_count,     HAL_VARS + 4
+    .equ SPRITES_A,     0xff2000    | arcade 0x900000 sprite list
+    .equ SPRITES_B,     0xff2800    | arcade 0x904000 sprite list
+    .equ SHOWN_FLAG,    0xffe9b4    | nonzero: list B is the finished one
 
     .equ ARCADE_START,  0x0004ce
     .equ ARCADE_RESET,  0x00041a
@@ -37,7 +41,33 @@ hal_boot:
     dbra    d0, 3b
     move.b  #0x40, PAD1_CTRL
     move.b  #0x40, PAD1_DATA
+    bsr.w   load_box_graphics
     jmp     ARCADE_RESET
+
+load_box_graphics:
+    move.l  #0x40200000, VDP_CTRL
+    moveq   #15, d0
+1:  move.l  #0x22222222, VDP_DATA
+    moveq   #6, d1
+2:  move.l  #0x21111111, VDP_DATA
+    dbra    d1, 2b
+    dbra    d0, 1b
+    lea     box_colours(pc), a0
+    move.l  #0xc0000000, d1
+    moveq   #3, d0
+3:  move.l  d1, VDP_CTRL
+    move.w  (a0)+, VDP_DATA
+    move.w  (a0)+, VDP_DATA
+    move.w  (a0)+, VDP_DATA
+    addi.l  #0x00200000, d1
+    dbra    d0, 3b
+    rts
+
+box_colours:
+    .word   0x0420, 0x0eee, 0x0000
+    .word   0x0000, 0x00ee, 0x0000
+    .word   0x0000, 0x0e80, 0x0000
+    .word   0x0000, 0x0e4e, 0x0000
 
 | Runs after the arcade reset code has cleared work RAM, in place of its
 | power-on self-test (which reads back arcade video RAM).
@@ -56,8 +86,9 @@ hal_post_reset:
     jmp     ARCADE_START
 
 hal_vblank:
-    movem.l d0-d2/a0, -(sp)
+    movem.l d0-d7/a0-a2, -(sp)
     move.w  VDP_CTRL, d0
+    bsr.w   draw_boxes
     addq.l  #1, hal_frames
     moveq   #-1, d0
     lea     IO_SHADOW, a0
@@ -68,9 +99,106 @@ hal_vblank:
     move.w  d0, P3_SHADOW
     move.w  d0, P3_SHADOW + 6
     move.b  d0, Q_SHADOW + 0x1f
-    bsr.s   read_pad
-    movem.l (sp)+, d0-d2/a0
+    bsr.w   read_pad
+    movem.l (sp)+, d0-d7/a0-a2
     jmp     ARCADE_VBLANK
+
+| Draws every entry of the finished arcade sprite list as outlined boxes:
+| one Mega Drive sprite per 32x32 piece of each tile block.
+draw_boxes:
+    move.l  #0x74000003, VDP_CTRL
+    lea     VDP_DATA, a1
+    lea     SPRITES_A, a0
+    tst.w   SHOWN_FLAG
+    beq.s   1f
+    lea     SPRITES_B, a0
+1:  clr.w   box_count
+    move.w  #255, d6
+box_entry:
+    move.w  6(a0), d3
+    move.w  d3, d0
+    andi.w  #0xff00, d0
+    cmpi.w  #0xff00, d0
+    beq.w   box_done
+    move.w  (a0), d0
+    andi.w  #0x1ff, d0
+    cmpi.w  #0x1c0, d0
+    blt.s   2f
+    subi.w  #0x200, d0
+2:  addi.w  #32, d0
+    move.w  2(a0), d1
+    andi.w  #0x1ff, d1
+    cmpi.w  #0x180, d1
+    blt.s   3f
+    subi.w  #0x200, d1
+3:  addi.w  #112, d1
+    move.w  d3, d4
+    lsr.w   #8, d4
+    andi.w  #15, d4
+    addq.w  #1, d4
+    move.w  d3, d5
+    rol.w   #4, d5
+    andi.w  #15, d5
+    addq.w  #1, d5
+    andi.w  #3, d3
+    ror.w   #3, d3
+    ori.w   #0x8001, d3
+    move.w  d6, -(sp)
+box_row:
+    move.w  d5, d2
+    cmpi.w  #2, d2
+    bls.s   4f
+    moveq   #2, d2
+4:  movea.w d0, a2
+    move.w  d4, d6
+box_col:
+    move.w  d6, d7
+    cmpi.w  #2, d7
+    bls.s   5f
+    moveq   #2, d7
+5:  cmpi.w  #79, box_count
+    bhs.s   box_full
+    cmpa.w  #0, a2
+    bne.s   6f
+    addq.w  #1, a2
+6:  move.w  d1, (a1)
+    move.w  d7, -(sp)
+    lsl.w   #3, d7
+    subq.w  #4, d7
+    add.w   d2, d7
+    add.w   d2, d7
+    subq.w  #1, d7
+    lsl.w   #8, d7
+    addq.w  #1, box_count
+    or.b    box_count + 1, d7
+    move.w  d7, (a1)
+    move.w  d3, (a1)
+    move.w  a2, (a1)
+    move.w  (sp)+, d7
+    move.w  d7, -(sp)
+    lsl.w   #4, d7
+    adda.w  d7, a2
+    move.w  (sp)+, d7
+    sub.w   d7, d6
+    bgt.s   box_col
+    move.w  d2, d7
+    lsl.w   #4, d7
+    add.w   d7, d1
+    sub.w   d2, d5
+    bgt.s   box_row
+    move.w  (sp)+, d6
+    addq.l  #8, a0
+    dbra    d6, box_entry
+    bra.s   box_done
+box_full:
+    addq.l  #2, sp
+box_done:
+    moveq   #0, d0
+    move.w  d0, (a1)
+    move.w  d0, (a1)
+    move.w  d0, (a1)
+    move.w  d0, (a1)
+    rts
 
 | Pad 1 -> arcade player 1 and system inputs (all active low).
 | B = attack, C = jump, A = coin, Start = start.

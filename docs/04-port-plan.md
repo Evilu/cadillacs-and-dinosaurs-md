@@ -43,7 +43,8 @@ The hardware layer (`src/hal.s`) boots the console, and on every VBlank fills th
 | I/O and video registers `0x800000–0x8001FF` | Shadow at `0xFF1000` |
 | Sound interface `0xF18000–0xF1803F` | Shadow at `0xFF1200` |
 | Player 3, EEPROM `0xF1C000–0xF1C01F` | Shadow at `0xFF1280` |
-| GFX RAM `0x900000–0x92FFFF` | Not handled yet (milestone 2 onward) |
+| Sprite lists `0x900000`, `0x904000` | RAM buffers at `0xFF2000`, `0xFF2800` |
+| Rest of GFX RAM `0x908000–0x92FFFF` | Not handled yet (milestone 3) |
 
 Measured over stage 1, the game writes 41% of its work RAM after boot and leaves one block of about 28 KB untouched (`0xFF0FD3–0xFF7FFF`). The shadows live there. The game's start-up does clear that block once, so anything the hardware layer keeps there is re-established every frame. Whether later stages use the block is not yet measured.
 
@@ -63,8 +64,8 @@ Not done in this milestone: any picture or sound, GFX RAM (writes go nowhere, re
 
 ### 2. Sprites
 
-- Point the sprite list builder (`0x13FA6`) at RAM buffers.
-- First as outlines: convert each arcade sprite entry to Mega Drive sprites with placeholder patterns, to prove positions, sizes and ordering.
+- **Done (emulator):** the sprite list builder (`0x13FA6`) and the list-clearing routine write to two RAM buffers at `0xFF2000` and `0xFF2800` in place of arcade video RAM (four address operands).
+- **Done (emulator):** outlines. Every VBlank the hardware layer reads the finished list and draws each entry as boxes, one Mega Drive sprite per 32×32 piece of the tile block, coloured by the low two bits of the arcade palette number. The title logo, the four characters on the select screen and the characters in stage 1 appear as moving silhouettes. The view is the middle 320 pixels of the arcade's 384. Only the first 79 pieces are drawn and nothing is done about the per-line limit yet.
 - Then real graphics: convert tiles from the user's ROM at build time, cut blocks into pieces of up to 32×32, load patterns through a VRAM cache and a DMA queue.
 - Replace the builder with one that writes the Mega Drive sprite table directly (a quarter of the game's CPU work).
 - Overflow rules for more than 80 sprites and more than 320 pixels on a line.
@@ -109,3 +110,5 @@ analysis/venv/bin/python3 -I tools/build/build.py analysis/work/dino_prg.bin \
 ```
 
 Pad: A = coin, Start = start, B = attack, C = jump.
+
+The current build shows sprite outlines on a blue background and has no backgrounds, real graphics or sound. It has been run in MAME's Mega Drive driver only. Do not run it on a real console or flash cart yet: it still writes to arcade video RAM addresses, which a real Mega Drive does not tolerate.

@@ -103,6 +103,12 @@ def main(prg_path, access_path, out_path):
     report.append(f'{static} more redirected where the value is the operand of a valid instruction')
     report.append(f'{skipped} values that look like I/O addresses left alone (not an instruction operand)')
 
+    for off, old, new in ((0xb12, 0x900000, 0xff2000), (0xb24, 0x904000, 0xff2800),
+                          (0x13fb6, 0x900000, 0xff2000), (0x13fc4, 0x904000, 0xff2800)):
+        assert struct.unpack_from('>I', rom, off)[0] == old
+        struct.pack_into('>I', rom, off, new)
+    report.append('sprite list buffers moved to work RAM (4 operands)')
+
     hal, sym = assemble_hal()
     struct.pack_into('>I', rom, 0x4c8 + 2, sym['hal_post_reset'])
     assert rom[0x4c8:0x4ca] == b'\x4e\xf9'
