@@ -19,7 +19,8 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 | Path | Contents |
 |---|---|
 | `docs/` | Research documents and the port plan |
-| `src/hal.s` | The Mega Drive hardware layer (GNU as, Motorola operand syntax, `\|` comments) |
+| `src/hal.s` | The Mega Drive hardware layer: boot, VBlank, sprites, palettes, input (GNU as, Motorola operand syntax, `\|` comments) |
+| `src/background.s` | Playfield store, plane B ring, tile cache, and the TRAP #8 instruction emulator |
 | `tools/build/build.py` | Builds the Mega Drive ROM from the user's program image |
 | `test/roms/md/` (ignored) | Built ROMs for the user to try |
 | `tools/prep_roms.py` | Builds flat program and graphics images from ROM sets |
@@ -63,7 +64,11 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 - Build with `analysis/venv/bin/python3 -I tools/build/build.py analysis/work/dino_prg.bin analysis/work/dino_gfx.bin analysis/mame/dino_access/access_pcs.csv test/roms/md/cadillacs_md.md`. The output contains Capcom's program and graphics: never commit it. Name ROMs `.md`: emulators pick the system from the extension.
 - Hardware accesses with fixed addresses are redirected to shadows at `0xFF1000` (I/O and video registers), `0xFF1200` (sound) and `0xFF1280` (player 3, EEPROM). The game's start-up clears that RAM, so the hardware layer rewrites its inputs every VBlank.
 - Stand-in DIP switches must read `0xFF`; a zero in DIP C bit 7 sends the game into test mode.
-- **Mapper in MAME.** MAME enables the Sega (SSF2) mapper only for a software-list entry with `slot` `rom_ssf2` and a 9 MB data area; `tools/run_md.sh` writes one. It implements banks 0–9 only (bank 10 and up segfault), and word writes to the bank registers crash it: use byte writes, and keep the ROM under 5 MB.
+- **Mapper in MAME.** MAME enables bank switching only for a software-list entry; `tools/run_md.sh` writes one with slot `rom_titan` (Krikzz SSF, 32 banks). The `rom_ssf2` type implements only banks 0–9 and segfaults above. Use byte writes to the bank registers (`0xA130FF`); word writes crashed MAME.
+- **Budget: about 13,000 68000 instructions per frame.** Measure with MAME's trace (`trace file,maincpu` from Lua with `-debug -debugger none`) and count per routine; estimates in cycles were wrong by 3x. Capcom's code needs about half.
+- **The hardware layer has its own stack** (`hal_enter` / `hal_leave`, `0xFF19A0–0xFF1FFF`). Never push more than a few bytes on the arcade's supervisor stack or task stacks.
+- **RAM map** (free block `0xFF0FD3–0xFF7FFF` in stage 1): shadows `0xFF1000`, variables `0xFF12C0–0xFF131F`, sprite engine `0xFF1320–0xFF19A0`, sprite lists `0xFF2000`, palettes `0xFF3000`, playfield store `0xFF4000`, background cache tables `0xFF7000`. Check new variables against the next block's start; one overlap broke the sprite chain.
+- **Tilemap writes** go through `TRAP #8` (table at ROM `0x190000`, hash at `0x198000`), traps #9–#11 (fast paths), or are reduced to register side effects for layers not drawn yet (`build.py`). A trap costs about 120 instructions: hot sites need fast paths.
 - **Static patching pitfalls.** A table's start address is often another table's loop end marker (`lea $914000,a1` ends the scroll 3 clear); `build.py` leaves such end markers alone. Capstone invents operands when its buffer is too short; always give it 10+ bytes.
 - **Never walk an unterminated sprite list every frame.** 256 entries cost more than a frame; the hardware layer rebuilds the sprite table only when the game flips its list flag (`0xFFE9B4`).
 - The arcade kernel masks interrupts with `0x2600` to shut out its level-2 VBlank; on the Mega Drive that also delays the level-6 VBlank.

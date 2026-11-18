@@ -80,7 +80,7 @@ The `idle_reads` column of `cps1_trace.lua` and the CPU-load lines of `summarise
 tools/check_md.sh <rom.bin> <out dir> [frames] [snapshot every N frames]
 ```
 
-Runs the ROM headless in MAME's `genesis` driver with no input and reports whether the CPU is running, plus picture width, sprites, colours, the largest per-frame DMA and sprite-limit overflow. Snapshots and VDP dumps land in the output folder. BlastEm (`brew install blastem`) is the choice for hands-on testing; it needs a window.
+Runs the ROM headless in MAME's `genesis` driver (through `tools/run_md.sh`, which enables the mapper) with no input and reports whether the CPU is running, plus picture width, sprites, colours, the largest per-frame DMA and sprite-limit overflow. Snapshots and VDP dumps land in the output folder. BlastEm (`brew install blastem`) is the choice for hands-on testing; it needs a window.
 
 ## 7. Map hardware accesses and RAM use
 

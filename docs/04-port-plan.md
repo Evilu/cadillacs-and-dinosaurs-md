@@ -103,10 +103,33 @@ Still to do in this milestone:
 
 ### 3. Backgrounds and palettes
 
-- Scroll 2 to plane B, scroll 3 to plane A, scroll 1 (HUD) to the window, following doc 02.
-- Keep copies of the tables the game reads back (scroll 2 map and palettes) in RAM; send the others straight to VRAM.
-- Per-scene palette plans made offline: 16 arcade palettes into 4.
-- 320-pixel view of the 384-pixel layout.
+**Done (emulator): the playfield (scroll 2) on plane B.** The character select artwork, the stage 1 intro scene, and the rooftop floor and walls scroll with the camera under the sprites. The game finishes 51 to 60 sprite lists a second in stage 1 (measured over 50 seconds of scripted play).
+
+What the measurements showed and how it works:
+
+- **The game does not write maps locally.** It fills whole maps at scene changes and prepares columns half a map (32 columns) ahead of the camera, so the planes cannot be fed as it writes. The playfield is kept in a RAM store of 64 columns × 32 rows (8 KB, arcade rows taken mod 32) and drawn from it.
+- **The game reads the playfield map back** for floor zones and collision (the top six bits of each attribute word, read by `0x1309C` and `0x1361E`); those reads are served from the store.
+- **Plane B is a ring** of 32 arcade columns × 16 rows that follows the camera: a new column is drawn as the camera crosses a column boundary, and a jump of more than 8 columns redraws the ring.
+- **Playfield tiles go through a reference-counted VRAM cache** of 200 slots (800 patterns), keyed by tile code in a 512-entry hash table, filled from ROM by CPU copy as cells are drawn.
+- **Writes reach the store in three ways:**
+  - 122 instructions that touch the playfield through pointers are replaced by `TRAP #8`. The handler looks the instruction up in a build-time hash table, decodes it (MOVE, CLR, AND, OR, any addressing mode) and performs it, sending accesses to arcade video RAM to the store.
+  - Three heavy routines (the table clear at `0xBA0`, the 2 × 2 block writer, the long copier) get dedicated traps (#9 to #11).
+  - 210 instructions that only touch layers not drawn yet (HUD text, far background) are reduced at build time to their register side effects (`addq` for address increments, a cleared register for reads). The routine at `0xA7B8`, which only fills a table the port drops, returns immediately.
+- **The hardware layer runs on its own stack** at `0xFF19A0–0xFF1FFF`. The arcade's supervisor stack (`0xFF0E66`) sits directly above its task stacks and has no room: nesting the trap handler, VBlank and Capcom's VBlank handler overwrote a task's return address.
+- **Line 2 of CRAM** carries the playfield palette used most on screen (sampled every 32 frames); sprites use lines 0, 1 and 3.
+
+The instruction budget is the hard constraint. The Mega Drive's 68000 executes about 13,000 instructions per frame. Measured with MAME's instruction trace on the select screen before these changes, the sprite converter used about 9,500 of them, a trap cost about 170, and Capcom's code got 2%. After them, in stage 1, Capcom's code gets 58%. To get there:
+
+- the sprite converter keeps its loop values in registers and runs on even frames only;
+- palette colours are converted only when their arcade value changes;
+- trap lookups use a hash table.
+
+Still to do:
+
+- The far background (scroll 3) on plane A, and the HUD (scroll 1) in the window. Their writes are currently dropped.
+- Palettes: one CRAM line per layer gives wrong colours for tiles in other palettes; per-scene palette plans made offline (16 arcade palettes into 4).
+- Sprites at 60 Hz again, by replacing Capcom's sprite list builder instead of converting its output.
+- A one-frame vertical move of the camera redraws the whole ring; stages that scroll vertically need column and row streaming.
 
 ### 4. Sound
 
@@ -144,6 +167,6 @@ TRACE_INPUT=arcade tools/check_md.sh test/roms/md/cadillacs_md.md analysis/mame/
 
 Pad: A = coin, Start = start, B = attack, C = jump.
 
-The ROM uses the Sega (SSF2) mapper and says so in its header (`SEGA SSF`). MAME enables the mapper only through a software-list entry, which `tools/run_md.sh` writes, and only implements banks 0–9, so the ROM must stay under 5 MB for MAME. Other emulators and flash carts read the header.
+The ROM is 6 MB and uses the Sega/Krikzz SSF mapper, which its header announces (`SEGA SSF`). MAME enables bank switching only for a software-list entry: `tools/run_md.sh` writes one with slot type `rom_titan` (the Krikzz SSF mapper, 32 banks); MAME 0.289's `rom_ssf2` type implements only the 10 banks Super Street Fighter II used. Other emulators and flash carts read the header.
 
-The current build shows the sprites with their real graphics on a black screen. It has no backgrounds, HUD or sound. It has been run in MAME's Mega Drive driver only. Do not run it on a real console or flash cart yet: it still writes to arcade tilemap addresses, which a real Mega Drive does not tolerate.
+The current build shows the sprites and the playfield. The far background is black, and there is no HUD or sound. The game runs close to full speed; sprites animate at 30 Hz. It has been run in MAME's Mega Drive driver only. Do not run it on a real console or flash cart yet: it still writes to arcade tilemap addresses, which a real Mega Drive does not tolerate.

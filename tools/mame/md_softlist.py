@@ -3,7 +3,8 @@
 usage: md_softlist.py <rom.md> <out dir>
 Creates <out dir>/hash/megadriv.xml and <out dir>/roms/cadmd/<rom name>; run MAME with
   mame genesis cadmd -hashpath <out dir>/hash -rompath <out dir>/roms
-MAME only enables bank switching for cartridges its software list marks as rom_ssf2.
+MAME only enables bank switching for cartridges its software list marks with a mapper.
+rom_titan is the Krikzz SSF mapper (32 banks); rom_ssf2 implements only 10.
 """
 import hashlib
 import shutil
@@ -19,7 +20,7 @@ def main(rom, out):
     dest = out / 'roms' / 'cadmd'
     dest.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(rom, dest / rom.name)
-    area = max(0x900000, 1 << (len(data) - 1).bit_length())
+    area = 1 << (len(data) - 1).bit_length()
     (out / 'hash' / 'megadriv.xml').write_text(f'''<?xml version="1.0"?>
 <!DOCTYPE softwarelist SYSTEM "softwarelist.dtd">
 <softwarelist name="megadriv" description="Cadillacs and Dinosaurs MD test builds">
@@ -28,7 +29,7 @@ def main(rom, out):
 		<year>2026</year>
 		<publisher>test</publisher>
 		<part name="cart" interface="megadriv_cart">
-			<feature name="slot" value="rom_ssf2"/>
+			<feature name="slot" value="rom_titan"/>
 			<dataarea name="rom" width="16" endianness="big" size="{area}">
 				<rom name="{rom.name}" size="{len(data)}" crc="{zlib.crc32(data):08x}" sha1="{hashlib.sha1(data).hexdigest()}" offset="0"/>
 			</dataarea>

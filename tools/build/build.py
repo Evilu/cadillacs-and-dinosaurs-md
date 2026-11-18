@@ -12,11 +12,10 @@ ROM layout:
   0x180000  hardware layer
   0x187F00  colour table: [brightness][nibble] -> Mega Drive level << 1
   0x188000  tile flags: one byte per arcade 16x16 tile, nonzero if it has pixels
-  0x190000  arcade 16x16 tiles 0x0800-0x6FFF (the sprite range) as four Mega Drive
-            patterns each (TL, BL, TR, BR)
-
-The ROM stays under 5 MB because MAME's Sega mapper implements only the ten
-512 KB banks Super Street Fighter II used.
+  0x190000  patch table: count, then per instruction replaced by TRAP #8:
+            long address, word length, four words of the original instruction
+  0x200000  all 32768 arcade 16x16 tiles as four Mega Drive patterns each
+            (TL, BL, TR, BR), behind the Sega/Krikzz SSF mapper
 """
 import csv
 import re
@@ -34,8 +33,10 @@ PROGRAM_SIZE = 0x180000
 HAL_BASE = 0x180000
 COLOUR_TABLE = 0x187F00
 TILE_FLAGS = 0x188000
-TILE_DATA = 0x190000
-SPRITE_TILES = (0x0800, 0x7000)
+PATCH_TABLE = 0x190000
+PATCH_HASH = 0x198000
+PATCH_HASH_SIZE = 1024
+TILE_DATA = 0x200000
 
 IO_RELOCATIONS = [
     (0x800000, 0x800200, 0xff1000),
@@ -44,8 +45,23 @@ IO_RELOCATIONS = [
     (0xf1c000, 0xf1c020, 0xff1280),
 ]
 GFX_RELOCATIONS = [
-    (0x914000, 0x918000, 0xff3000),
+    (0x914000, 0x915000, 0xff3000),
 ]
+TABLE_RANGES = [(0x908000, 0x914000), (0x915000, 0x930000)]
+TRAP8 = 0x4e48
+NOP = 0x4e71
+FAST_PATHS = [
+    (0x000ba0, '30c030c1b1c9', 11),
+    (0x021446, '20db20db41e8003820db20db', 9),
+    (0x020500, '20db20db41e8003820db20db', 9),
+    (0x020564, '20db20db41e8003820db20db', 9),
+    (0x0205ac, '20d951ccfffc', 10),
+]
+FAST_PATH_HANDLERS = {9: 'trap_meta', 10: 'trap_copy', 11: 'trap_fill'}
+SKIPPED_ROUTINES = [
+    (0x00a7b8, '207c00918000', 'fills 0x918000, a table the port drops'),
+]
+SKIP_RANGES = [(0xaa944, 0xaac00)]
 GFX_RAM = (0x900000, 0x930000)
 SPRITE_LISTS = [(0xb12, 0x900000, 0xff2000), (0xb24, 0x904000, 0xff2800),
                 (0x13fb6, 0x900000, 0xff2000), (0x13fc4, 0x904000, 0xff2800)]
@@ -72,7 +88,7 @@ def loaded_before(md, rom, start):
 def assemble_hal():
     with tempfile.TemporaryDirectory() as tmp:
         obj, elf, out = (Path(tmp) / n for n in ('hal.o', 'hal.elf', 'hal.bin'))
-        subprocess.run(['m68k-elf-as', '-m68000', '--register-prefix-optional',
+        subprocess.run(['m68k-elf-as', '-m68000', '--register-prefix-optional', '-I', str(ROOT / 'src'),
                         str(ROOT / 'src' / 'hal.s'), '-o', str(obj)], check=True)
         subprocess.run(['m68k-elf-ld', '-Ttext', hex(HAL_BASE), '-e', hex(HAL_BASE), '-o', str(elf), str(obj)],
                        check=True)
@@ -137,6 +153,96 @@ def patch_static(rom, table, done, immediates, label, report):
                   f'{bounds} end markers of other tables left alone')
 
 
+def apply_fast_paths(rom, sym, report):
+    covered = []
+    for addr, original, trap in FAST_PATHS:
+        length = len(original) // 2
+        assert rom[addr:addr + length].hex() == original, f'unexpected code at {addr:06x}'
+        rom[addr:addr + length] = struct.pack('>H', 0x4e40 | trap) + struct.pack('>H', NOP) * (length // 2 - 1)
+        covered.append((addr, addr + length))
+    for addr, original, _ in SKIPPED_ROUTINES:
+        assert rom[addr:addr + len(original) // 2].hex() == original, f'unexpected code at {addr:06x}'
+        rom[addr:addr + 2] = b'\x4e\x75'
+        covered.append((addr, addr + 0x42))
+    report.append(f'{len(FAST_PATHS)} tilemap routines replaced by fast paths, {len(SKIPPED_ROUTINES)} skipped')
+    return covered
+
+
+STORED_TABLES = [(0x90c000, 0x910000)]
+
+
+def drop_replacement(ins):
+    m = re.match(r'(move|clr|and|or)\.([bwl])$', ins.mnemonic)
+    if not m:
+        return None
+    op, size = m.group(1), {'b': 1, 'w': 2, 'l': 4}[m.group(2)]
+    operands = [o.strip() for o in re.split(r',(?![^(]*\))', ins.op_str)]
+    code = []
+    for operand in operands[:-1] if op in ('move', 'and', 'or') else []:
+        inc = re.fullmatch(r'\(a([0-7])\)\+', operand)
+        dec = re.fullmatch(r'-\(a([0-7])\)', operand)
+        if inc:
+            code.append(0x5088 | ((size & 7) << 9) | int(inc.group(1)))
+        if dec:
+            code.append(0x5188 | ((size & 7) << 9) | int(dec.group(1)))
+    dest = operands[-1]
+    reg = re.fullmatch(r'd([0-7])', dest)
+    inc = re.fullmatch(r'\(a([0-7])\)\+', dest)
+    dec = re.fullmatch(r'-\(a([0-7])\)', dest)
+    if reg:
+        if op != 'move':
+            return None
+        r = int(reg.group(1))
+        code.append({1: 0x4200 | r, 2: 0x4240 | r, 4: 0x7000 | (r << 9)}[size])
+    elif inc:
+        code.append(0x5088 | ((size & 7) << 9) | int(inc.group(1)))
+    elif dec:
+        code.append(0x5188 | ((size & 7) << 9) | int(dec.group(1)))
+    if len(code) * 2 > ins.size:
+        return None
+    return struct.pack(f'>{len(code)}H', *code) + struct.pack('>H', NOP) * (ins.size // 2 - len(code))
+
+
+def build_patch_table(rom, access_path, covered, report):
+    md = Cs(CS_ARCH_M68K, CS_MODE_BIG_ENDIAN | CS_MODE_M68K_000)
+    entries = {}
+    dropped = 0
+    for row in csv.DictReader(open(access_path)):
+        if row['region'] != '1':
+            continue
+        lo, hi = int(row['low'], 16), int(row['high'], 16)
+        if not any(lo < b and hi >= a for a, b in TABLE_RANGES):
+            continue
+        pc = int(row['pc'], 16)
+        if any(a <= pc < b for a, b in covered + SKIP_RANGES):
+            continue
+        ins = next(md.disasm(bytes(rom[pc:pc + 12]), pc))
+        if not any(lo < b and hi >= a for a, b in STORED_TABLES):
+            replacement = drop_replacement(ins)
+            if replacement is not None:
+                rom[pc:pc + ins.size] = replacement
+                dropped += 1
+                continue
+        assert ins.size <= 8, f'{pc:06x} {ins.mnemonic} {ins.op_str} is too long to record'
+        entries[pc] = bytes(rom[pc:pc + ins.size])
+    order = sorted(entries)
+    table = bytearray(struct.pack('>H', len(order)))
+    for pc in order:
+        original = entries[pc]
+        table += struct.pack('>IH', pc, len(original)) + original.ljust(10, b'\0')
+        rom[pc:pc + len(original)] = struct.pack('>H', TRAP8) + struct.pack('>H', NOP) * (len(original) // 2 - 1)
+    slots = [0xffff] * PATCH_HASH_SIZE
+    for index, pc in enumerate(order):
+        h = (pc >> 1) & (PATCH_HASH_SIZE - 1)
+        while slots[h] != 0xffff:
+            h = (h + 1) & (PATCH_HASH_SIZE - 1)
+        slots[h] = index * 16
+    table = table.ljust(PATCH_HASH - PATCH_TABLE, b'\xff') + struct.pack(f'>{PATCH_HASH_SIZE}H', *slots)
+    report.append(f'{len(entries)} instructions that touch arcade tilemaps replaced by TRAP #8; '
+                  f'{dropped} that only touch layers not drawn yet reduced to their register side effects')
+    return bytes(table)
+
+
 def convert_tiles(gfx):
     tiles = np.frombuffer(gfx, dtype=np.uint8).reshape(-1, 16, 2, 4)
     bits = np.unpackbits(tiles, axis=3).reshape(-1, 16, 2, 4, 8)
@@ -190,6 +296,8 @@ def main(prg_path, gfx_path, access_path, out_path):
     report.append('sprite list buffers moved to work RAM (4 operands)')
 
     hal, sym = assemble_hal()
+    covered = apply_fast_paths(rom, sym, report)
+    patch_table = build_patch_table(rom, access_path, covered, report)
     assert rom[POST_RESET_JUMP:POST_RESET_JUMP + 2] == b'\x4e\xf9'
     struct.pack_into('>I', rom, POST_RESET_JUMP + 2, sym['hal_post_reset'])
 
@@ -200,6 +308,9 @@ def main(prg_path, gfx_path, access_path, out_path):
     for i in range(25, 32):
         vectors[i] = sym['hal_ignore']
     vectors[30] = sym['hal_vblank']
+    vectors[40] = sym['gfx_trap']
+    for trap, handler in FAST_PATH_HANDLERS.items():
+        vectors[32 + trap] = sym[handler]
     for i in range(48, 64):
         vectors[i] = sym['hal_crash']
     struct.pack_into('>64I', rom, 0, *vectors)
@@ -211,9 +322,11 @@ def main(prg_path, gfx_path, access_path, out_path):
     rom += colour_table()
     rom += b'\xff' * (TILE_FLAGS - len(rom))
     rom += flags
+    rom += b'\xff' * (PATCH_TABLE - len(rom))
+    rom += patch_table
+    assert len(rom) <= TILE_DATA
     rom += b'\xff' * (TILE_DATA - len(rom))
-    rom += tiles[SPRITE_TILES[0] * 128:SPRITE_TILES[1] * 128]
-    assert len(rom) <= 0x500000
+    rom += tiles
     rom[0x100:0x200] = header(len(rom) - 1)
     checksum = sum(struct.unpack_from(f'>{(len(rom) - 0x200) // 2}H', rom, 0x200)) & 0xffff
     struct.pack_into('>H', rom, 0x18e, checksum)
