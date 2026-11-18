@@ -26,6 +26,7 @@
     .equ conv_gap,      HAL_VARS + 76   | least frames between conversions: 2, or 3 when the game falls behind
     .equ flips,         HAL_VARS + 78   | lists shown in the current 32-frame window
     .equ conv_count,    HAL_VARS + 80
+    .equ cram_dirty,    HAL_VARS + 82
     .equ ent_left,      HAL_VARS + 66
     .equ RAW_CACHE,     0xff1920    | arcade colour last converted for each CRAM entry
 
@@ -134,7 +135,7 @@ hal_post_reset:
     dbra    d1, 1b
     move.l  d0, line_pal
     move.w  d0, last_flag
-    move.w  #2, conv_gap
+    move.w  #1, conv_gap
     bsr.w   bg_init
     move.w  #0x8174, VDP_CTRL
     jmp     ARCADE_START
@@ -202,12 +203,16 @@ flush_video:
     move.l  #0x40000010, (a4)
     move.w  s3_vscroll, VDP_DATA
     move.w  s2_vscroll, VDP_DATA
-    move.l  #0xc0000000, (a4)
-    lea     CRAM_BUF, a0
-    moveq   #63, d0
-4:  move.w  (a0)+, VDP_DATA
-    dbra    d0, 4b
-    rts
+    tst.b   cram_dirty
+    beq.s   4f
+    clr.b   cram_dirty
+    move.l  #0x93409400, (a4)
+    move.l  #0x9550968c, (a4)
+    move.w  #0x977f, (a4)
+    move.w  #0xc000, (a4)
+    move.w  #0x0080, -(sp)
+    move.w  (sp)+, (a4)
+4:  rts
 
 | d0 source address, d1 VRAM address, d2 length in words, a4 VDP control port
 dma_to_vram:
@@ -270,7 +275,7 @@ build_sprites:
     bra.s   6f
 5:  cmpi.w  #28, flips
     blo.s   6f
-    cmpi.w  #2, d1
+    cmpi.w  #1, d1
     bls.s   6f
     subq.w  #1, d1
 6:  move.w  d1, conv_gap
@@ -302,13 +307,11 @@ next_entry:
     move.l  (a0), d0
     or.l    4(a0), d0
     beq.w   entries_done
-    move.w  6(a0), d1
-    move.w  d1, d0
-    andi.w  #0xff00, d0
-    cmpi.w  #0xff00, d0
+    cmpi.b  #0xff, 6(a0)
     beq.w   entries_done
     move.w  4(a0), d5
     bmi.w   skip_entry
+    move.w  6(a0), d1
     move.w  d1, d7
     lsr.w   #8, d7
     andi.w  #15, d7
@@ -393,7 +396,7 @@ col_loop:
     andi.w  #0xfff0, d1
     or.w    d1, d0
     add.w   a5, d0
-    bmi.s   col_next
+    bmi.w   col_next
     move.w  d4, d2
     btst    #5, e_flip + 1
     beq.s   7f
@@ -404,17 +407,78 @@ col_loop:
 7:  lsl.w   #4, d2
     add.w   a4, d2
     cmpi.w  #128 - 32, d2
-    ble.s   col_next
+    ble.w   col_next
     cmpi.w  #448, d2
-    bge.s   col_next
+    bge.w   col_next
+    move.b  0(a2,d0.w), d1
+    tst.w   d6
+    beq.s   1f
+    or.b    1(a2,d0.w), d1
+1:  tst.b   d1
+    beq.w   col_next
+    move.w  d0, d1
+    tst.w   d6
+    bne.s   2f
+    ori.w   #0x8000, d1
+2:  move.w  d1, d0
+    lsr.w   #4, d0
+    eor.w   d1, d0
+    lsl.w   #2, d0
+    andi.w  #0x78, d0
+    lea     CACHE_KEY, a3
+    adda.w  d0, a3
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit
+    addq.w  #8, d0
+    andi.w  #0x78, d0
+    lea     CACHE_KEY, a3
+    adda.w  d0, a3
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit
+    move.w  d1, d0
+    andi.w  #0x7fff, d0
     bsr.w   emit_piece
-    cmpi.w  #MAX_SPRITES, sat_count
+    bra.s   ep_done
+ep_hit:
+    subq.l  #2, a3
+    move.w  stamp, 0x100(a3)
+    move.w  a3, d0
+    lsl.w   #2, d0
+    subi.w  #0x5660, d0
+    move.w  a6, d1
+    or.w    d0, d1
+    move.w  d3, (a1)+
+    move.w  a1, d0
+    lsr.w   #3, d0
+    subi.w  #0x263, d0
+    tst.w   d6
+    beq.s   3f
+    ori.w   #0x0d00, d0
+    bra.s   4f
+3:  ori.w   #0x0500, d0
+4:  move.w  d0, (a1)+
+    move.w  d1, (a1)+
+    move.w  d2, (a1)+
+ep_done:
+    cmpa.l  #SAT_BUF + MAX_SPRITES * 8, a1
     bhs.w   entries_done
 col_next:
     addq.w  #1, d4
     add.w   d6, d4
     cmp.w   d7, d4
-    blt.s   col_loop
+    blt.w   col_loop
 row_next:
     move.w  e_row, d0
     addq.w  #1, d0
@@ -426,7 +490,10 @@ skip_entry:
     subq.w  #1, ent_left
     bpl.w   next_entry
 entries_done:
-    move.w  sat_count, d0
+    move.w  a1, d0
+    subi.w  #SAT_BUF & 0xffff, d0
+    lsr.w   #3, d0
+    move.w  d0, sat_count
     bne.s   8f
     lea     SAT_BUF, a1
     clr.l   (a1)+
@@ -495,7 +562,21 @@ emit_piece:
     lea     CACHE_KEY, a3
     adda.w  d4, a3
     bsr.w   free_way
-    beq.w   8f
+    bne.s   3f
+    move.w  #14, -(sp)
+ep_scan:
+    addq.w  #8, d4
+    andi.w  #0x78, d4
+    lea     CACHE_KEY, a3
+    adda.w  d4, a3
+    bsr.w   free_way
+    bne.s   ep_found
+    subq.w  #1, (sp)
+    bne.s   ep_scan
+    addq.l  #2, sp
+    bra.w   8f
+ep_found:
+    addq.l  #2, sp
 3:  move.w  d5, (a3)
     move.w  d1, 0x100(a3)
     move.l  a3, d4
@@ -530,20 +611,20 @@ hit:
     addi.w  #SLOT_BASE, d4
 write_sat:
     move.w  d3, (a1)+
+    move.w  a1, d1
+    lsr.w   #3, d1
+    subi.w  #0x263, d1
     moveq   #0x05, d5
     tst.w   d6
     beq.s   5f
     moveq   #0x0d, d5
 5:  lsl.w   #8, d5
-    move.w  sat_count, d1
-    addq.w  #1, d1
     move.b  d1, d5
     move.w  d5, (a1)+
     move.w  a6, d5
     or.w    d4, d5
     move.w  d5, (a1)+
     move.w  d2, (a1)+
-    move.w  d1, sat_count
 8:  movem.l (sp)+, d4-d5
 9:  rts
 
@@ -758,6 +839,7 @@ pal_distance:
     rts
 
 | Converts only the colours whose arcade value changed since the last frame.
+| Unchanged colours are skipped two at a time.
 build_cram:
     lea     CRAM_BUF, a1
     lea     line_pal, a3
@@ -787,10 +869,31 @@ build_cram:
     lsl.w   #5, d0
     lea     PALETTES, a2
     adda.w  d0, a2
-7:  moveq   #14, d6
-2:  move.w  (a2)+, d0
+7:  moveq   #6, d6
+2:  cmpm.l  (a2)+, (a5)+
+    bne.s   8f
+    addq.l  #4, a1
+    dbra    d6, 2b
+    bra.s   12f
+8:  subq.l  #4, a2
+    subq.l  #4, a5
+    bsr.s   cram_one
+    bsr.s   cram_one
+    dbra    d6, 2b
+12: bsr.s   cram_one
+    bra.s   5f
+4:  moveq   #14, d6
+3:  clr.w   (a1)+
+    clr.w   (a5)+
+    dbra    d6, 3b
+5:  dbra    d7, 1b
+    rts
+
+| a2 arcade colour, a5 its cached copy, a1 Mega Drive colour, a4 colour table
+cram_one:
+    move.w  (a2)+, d0
     cmp.w   (a5), d0
-    beq.s   8f
+    beq.s   2f
     move.w  d0, (a5)
     move.w  d0, d1
     lsr.w   #8, d1
@@ -813,15 +916,9 @@ build_cram:
     or.w    d1, d2
     or.b    0(a4,d2.w), d3
     move.w  d3, (a1)
-8:  addq.l  #2, a1
-    addq.l  #2, a5
-    dbra    d6, 2b
-    bra.s   5f
-4:  moveq   #14, d6
-3:  clr.w   (a1)+
-    clr.w   (a5)+
-    dbra    d6, 3b
-5:  dbra    d7, 1b
+    st      cram_dirty
+2:  addq.l  #2, a5
+    addq.l  #2, a1
     rts
 
 | ---------------------------------------------------------------- input
