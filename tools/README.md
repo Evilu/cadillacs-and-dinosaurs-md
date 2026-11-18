@@ -49,7 +49,7 @@ TRACE_OUT=ffmd_run TRACE_FRAMES=21600 TRACE_SNAP_EVERY=300 \
 | `mame/cps1_trace.lua` | Per frame: sprite list, visible tilemap cells, palettes in use, and the graphics working set in Mega Drive 8×8 patterns (blank cells skipped, checked against the graphics ROM), plus a VRAM-sized cache model. Plays the game by script. `LAYER_CTRL` and `LAYER_MASKS` are the CPS-B layer-control offset and enable masks from MAME's `cps1_v.cpp` (`dino`: `0a`, `16,16,16`). `IDLE_FLAG` is the frame flag the game's scheduler polls once per task slot (`ffight`: `ff1100`, `dino`: `ff0152`); reads per frame give the time the CPU spent waiting |
 | `mame/md_trace.lua` | Decodes every 68000 write to the VDP: DMA size, target and source, fills, copies, CRAM and register writes, writes during active display. Keeps its own VRAM and CRAM copies (MAME does not expose the real VRAM to Lua), walks the sprite table each frame, and dumps VRAM, CRAM and registers at snapshot frames. Plays the game by script |
 
-`dino` also needs MAME's QSound DSP ROM set (`qsound.zip`) in the ROM folder.
+`dino` also needs MAME's QSound DSP ROM set (`qsound.zip`, containing `dl-1425.bin`) on the ROM path. For `dino`, summarise with `--broad --clock 12e6 --poll-cycles 97.5`.
 
 ## 4. Summarise
 

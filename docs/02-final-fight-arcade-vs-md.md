@@ -337,7 +337,7 @@ The arcade's sound interface is a narrow queue of command numbers, the same desi
 
 What Final Fight MD shows works, and how it applies to the port described in [doc 01](01-architecture-cps1-vs-mega-drive.md):
 
-1. **Fixed palettes per scene, planned offline.** One 15-colour line for the background, three shared by characters and HUD, no run-time palette traffic. Cadillacs and Dinosaurs' palette use per scene has to be measured before we know how much harder it is.
+1. **Fixed palettes per scene, planned offline.** One 15-colour line for the background, three shared by characters and HUD, no run-time palette traffic. Cadillacs and Dinosaurs uses fewer palettes per frame than Final Fight (16 against 25, see [doc 03](03-cadillacs-and-dinosaurs-measured.md)).
 2. **Map the layers the same way.** Street layer to plane B with high priority, far layer to plane A with low priority, HUD to the window, sprite patches where the far layer must show inside the HUD band.
 3. **Put static objects on a plane.** Scenery that does not move can be drawn as high-priority tiles and cost no sprites.
 4. **Use every byte of VRAM.** Fixed pattern regions per scene, with extra patterns in the unused window rows and after the sprite table. Graphics uncompressed in Mega Drive format, sent by DMA straight from ROM.
@@ -346,11 +346,11 @@ What Final Fight MD shows works, and how it applies to the port described in [do
 7. **No raster effects needed** for the basic picture, which leaves CPU time for the game.
 8. **Sound: replace, don't translate.** Both games queue command numbers; the port can keep that queue and feed an XGM2-class driver with re-arranged music and PCM effects.
 
-Where we differ from Final Fight MD by design: it is a C rewrite, and we plan to keep Capcom's 68000 code. The shared kernel design and the narrow hardware interface support that plan. On CPU time, Final Fight's own code would fit a Mega Drive frame but with only about a quarter of the frame to spare on average ([section 2.2](#22-how-busy-the-arcade-cpu-is)). Cadillacs and Dinosaurs runs on a faster 12 MHz CPU and may use more of it; that has to be measured.
+Where we differ from Final Fight MD by design: it is a C rewrite, and we plan to keep Capcom's 68000 code. The shared kernel design and the narrow hardware interface support that plan. On CPU time, Final Fight's own code would fit a Mega Drive frame but with only about a quarter of the frame to spare on average ([section 2.2](#22-how-busy-the-arcade-cpu-is)). Cadillacs and Dinosaurs runs on a faster 12 MHz CPU and does use more: its measurements are in [doc 03](03-cadillacs-and-dinosaurs-measured.md).
 
 ## 10. Open items
 
-- **Cadillacs and Dinosaurs traces.** MAME needs the QSound DSP's internal ROM (`qsound.zip`, containing `dl-1425.bin`) to run `dino`; it is not in our ROM folder. With it, the same trace gives Cadillacs' sprite, palette, pattern and CPU-load numbers.
+- **Cadillacs and Dinosaurs traces.** Done for stage 1: see [doc 03](03-cadillacs-and-dinosaurs-measured.md).
 - **Later stages.** All numbers are stage 1. Stages with more enemies or effects need their own traces (a save state or a stage-select input script).
 - **Same-scene comparison.** Drive both versions to the same moments to compare enemy counts, spawn positions and scroll limits directly.
 - **Arcade layer renders.** Render scroll 1, 2 and 3 separately to confirm which arcade layer carries what.

@@ -33,11 +33,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--cps1')
     ap.add_argument('--md')
+    ap.add_argument('--broad', action='store_true',
+                    help='count every frame with sprites and a scroll 2 picture (includes indoor scenes and cutscenes)')
     ap.add_argument('--clock', type=float, default=10e6, help='arcade 68000 clock in Hz (ffight 10e6, dino 12e6)')
     ap.add_argument('--poll-cycles', type=float, default=99, help='68000 cycles per scheduler frame-flag read')
     a = ap.parse_args()
     if a.cps1:
-        g = [r for r in rows(a.cps1) if n(r, 'obj_tiles') > 0 and n(r, 's3_unique') > 20 and n(r, 's2_on')]
+        if a.broad:
+            g = [r for r in rows(a.cps1) if n(r, 'obj_tiles') > 0 and n(r, 's2_unique') > 20 and n(r, 's1_on')]
+        else:
+            g = [r for r in rows(a.cps1) if n(r, 'obj_tiles') > 0 and n(r, 's3_unique') > 20 and n(r, 's2_on')]
         table('CPS-1 gameplay', g, ['obj_entries', 'obj_tiles', 'obj_unique', 'md_sprites_est', 'obj_line_tiles_max',
                                     'obj_lines_over_320px', 's1_unique', 's2_unique', 's2_prio_cells', 's3_unique',
                                     's3_prio_cells', 'palettes', 'colours', 'working_set_patterns',
@@ -51,6 +56,26 @@ def main():
             for name, budget in (('a Mega Drive frame', 7670454 / 59.92), ('a Mega Drive frame minus VBlank', 7670454 / 59.92 * 224 / 262)):
                 over = sum(1 for x in load if x * cyc > budget)
                 print(f'frames needing more than {name} ({budget:.0f} cycles): {over / len(load) * 100:.1f}%')
+            md = 7670454 / 59.92
+            hot = [n(r, 'frame') for r, x in zip(g, load) if x * cyc > md]
+            runs = []
+            for fr in hot:
+                if runs and fr - runs[-1][1] <= 30:
+                    runs[-1][1] = fr
+                    runs[-1][2] += 1
+                else:
+                    runs.append([fr, fr, 1])
+            burst = set()
+            for lo, hi, count in runs:
+                if count >= 5:
+                    burst.update(range(lo - 5, hi + 6))
+            calm = [x for r, x in zip(g, load) if n(r, 'frame') not in burst]
+            print(f'bursts of 5+ over-budget frames: {sum(1 for r in runs if r[2] >= 5)}, covering {len(load) - len(calm)} frames; '
+                  f'longest {max((r[1] - r[0] + 1 for r in runs), default=0)} frames')
+            print(f'outside bursts ({len(calm)} frames): cycles mean {statistics.mean(calm) * cyc:.0f} '
+                  f'p95 {pct(calm, .95) * cyc:.0f} p99 {pct(calm, .99) * cyc:.0f}; '
+                  f'over a Mega Drive frame {sum(1 for x in calm if x * cyc > md) / len(calm) * 100:.2f}%, '
+                  f'over frame minus VBlank {sum(1 for x in calm if x * cyc > md * 224 / 262) / len(calm) * 100:.1f}%')
         ch = sum(1 for x, y in zip(g, g[1:]) if x['obj_hash'] != y['obj_hash'])
         print(f'frames whose sprite list differs from the previous frame: {ch / len(g) * 100:.1f}%')
         miss = [n(r, 'lru_miss_patterns') for r in g]

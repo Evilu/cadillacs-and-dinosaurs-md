@@ -159,7 +159,7 @@ Speed is the difference:
 
 So the Mega Drive has roughly 55–64% of the arcade's CPU time per frame, and the hardware layer we add also has to run inside that budget. Slowdown in busy scenes is a real risk; a 30 fps fallback under load (as Final Fight MD offers) is the usual answer.
 
-These ratios compare capacity, not need: they only matter to the extent the arcade program uses its frame. Measured on Final Fight, the arcade's game work takes 56% of a 10 MHz frame on average and would fit a Mega Drive frame with about a quarter to spare ([doc 02, section 2.2](02-final-fight-arcade-vs-md.md#22-how-busy-the-arcade-cpu-is)). The same measurement for Cadillacs and Dinosaurs is pending.
+These ratios compare capacity, not need: they only matter to the extent the arcade program uses its frame. Measured on Final Fight, the arcade's game work takes 56% of a 10 MHz frame on average and would fit a Mega Drive frame with about a quarter to spare ([doc 02, section 2.2](02-final-fight-arcade-vs-md.md#22-how-busy-the-arcade-cpu-is)). Cadillacs and Dinosaurs uses more: about 105,000 cycles per frame in steady play, which leaves the Mega Drive little spare ([doc 03](03-cadillacs-and-dinosaurs-measured.md)).
 
 ### 2.2 Memory maps
 
@@ -346,7 +346,7 @@ flowchart LR
 ### 3.3 Sprites
 
 - 256 entries per frame: X, Y, tile code, attributes. A byte of `0xFF` in the attribute marks the end.
-- Each entry can be a block of up to 16×16 tiles of 16×16 pixels, taken from a 16-tile-wide sheet, so a whole character can be one or two entries. Final Fight hardly uses this (see [doc 02](02-final-fight-arcade-vs-md.md)); how much Cadillacs and Dinosaurs does is still to be measured.
+- Each entry can be a block of up to 16×16 tiles of 16×16 pixels, taken from a 16-tile-wide sheet, so a whole character can be one or two entries. Final Fight hardly uses this ([doc 02](02-final-fight-arcade-vs-md.md)); Cadillacs and Dinosaurs does, at 2.8 tiles per entry on average ([doc 03](03-cadillacs-and-dinosaurs-measured.md)).
 - Earlier entries are drawn on top.
 - The hardware renders sprites into a frame buffer, so there is no per-scanline sprite limit in the sources we read, and sprites appear one frame after the tile layers.
 - No per-sprite priority bit; ordering against tiles comes from the layer order and the priority masks.
