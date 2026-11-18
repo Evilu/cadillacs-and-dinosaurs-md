@@ -2,6 +2,8 @@
 
 usage: build.py <dino_prg.bin> <dino_gfx.bin> <access_pcs.csv> <out.md>
 
+Most people want build_md.py at the top of the repository, which starts from dino.zip.
+
 Takes the 1.5 MB arcade 68000 program, redirects its fixed-address hardware
 accesses to shadow locations in work RAM, replaces the vectors and the first
 header page, appends the hardware layer assembled from src/hal.s, and adds the
@@ -18,7 +20,9 @@ ROM layout:
             (TL, BL, TR, BR), behind the Sega/Krikzz SSF mapper
 """
 import csv
+import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -92,15 +96,25 @@ def loaded_before(md, rom, start):
     return None
 
 
+def binutils_prefix():
+    prefixes = [os.environ['M68K_PREFIX']] if os.environ.get('M68K_PREFIX') else ['m68k-elf-', 'm68k-linux-gnu-']
+    for prefix in prefixes:
+        if all(shutil.which(prefix + tool) for tool in ('as', 'ld', 'objcopy', 'nm')):
+            return prefix
+    sys.exit('68000 GNU binutils not found (tried ' + ', '.join(p + 'as' for p in prefixes) +
+             '); install them or set M68K_PREFIX')
+
+
 def assemble_hal():
+    tool = binutils_prefix()
     with tempfile.TemporaryDirectory() as tmp:
         obj, elf, out = (Path(tmp) / n for n in ('hal.o', 'hal.elf', 'hal.bin'))
-        subprocess.run(['m68k-elf-as', '-m68000', '--register-prefix-optional', '-I', str(ROOT / 'src'),
+        subprocess.run([tool + 'as', '-m68000', '--register-prefix-optional', '-I', str(ROOT / 'src'),
                         str(ROOT / 'src' / 'hal.s'), '-o', str(obj)], check=True)
-        subprocess.run(['m68k-elf-ld', '-Ttext', hex(HAL_BASE), '-e', hex(HAL_BASE), '-o', str(elf), str(obj)],
+        subprocess.run([tool + 'ld', '-Ttext', hex(HAL_BASE), '-e', hex(HAL_BASE), '-o', str(elf), str(obj)],
                        check=True)
-        subprocess.run(['m68k-elf-objcopy', '-O', 'binary', str(elf), str(out)], check=True)
-        nm = subprocess.run(['m68k-elf-nm', str(elf)], check=True, capture_output=True, text=True).stdout
+        subprocess.run([tool + 'objcopy', '-O', 'binary', str(elf), str(out)], check=True)
+        nm = subprocess.run([tool + 'nm', str(elf)], check=True, capture_output=True, text=True).stdout
         symbols = {line.split()[2]: int(line.split()[0], 16) for line in nm.splitlines() if len(line.split()) == 3}
         return out.read_bytes(), symbols
 
@@ -310,7 +324,11 @@ def header(rom_end):
 
 
 def main(prg_path, gfx_path, access_path, out_path):
-    rom = bytearray(Path(prg_path).read_bytes())
+    build(Path(prg_path).read_bytes(), Path(gfx_path).read_bytes(), access_path, out_path)
+
+
+def build(prg, gfx, access_path, out_path):
+    rom = bytearray(prg)
     assert len(rom) == PROGRAM_SIZE, 'expected the 1.5 MB dino program image'
     report = []
 
@@ -344,14 +362,14 @@ def main(prg_path, gfx_path, access_path, out_path):
 
     assert len(hal) <= COLOUR_TABLE - HAL_BASE
     rom += hal
-    tiles, flags = convert_tiles(Path(gfx_path).read_bytes())
+    tiles, flags = convert_tiles(gfx)
     rom += b'\xff' * (COLOUR_TABLE - len(rom))
     rom += colour_table()
     rom += b'\xff' * (TILE_FLAGS - len(rom))
     rom += flags
     rom += b'\xff' * (PATCH_TABLE - len(rom))
     rom += patch_table
-    far_tiles, far_flags = convert_far_tiles(Path(gfx_path).read_bytes())
+    far_tiles, far_flags = convert_far_tiles(gfx)
     assert len(rom) <= TILE_FLAGS3
     rom += b'\xff' * (TILE_FLAGS3 - len(rom))
     rom += far_flags

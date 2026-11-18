@@ -198,11 +198,10 @@ Still to do:
 
 ## Trying a build
 
-Built ROMs go to `test/roms/md/`, which git ignores because they contain the user's game program. Build with:
+Built ROMs go to `test/roms/md/`, which git ignores because they contain the user's game program. Build with `build_md.py` (see the README), which reads `dino.zip` and the patch-site list `tools/build/dino_access.csv` (the instruction addresses from the stage-1 access map, without counts):
 
 ```sh
-analysis/venv/bin/python3 -I tools/build/build.py analysis/work/dino_prg.bin analysis/work/dino_gfx.bin \
-  analysis/mame/dino_access/access_pcs.csv test/roms/md/cadillacs_md.md
+analysis/venv/bin/python3 -I build_md.py dino.zip test/roms/md/cadillacs_md.md
 tools/run_md.sh test/roms/md/cadillacs_md.md analysis/mame/run      # MAME with the mapper, in a window
 TRACE_INPUT=arcade tools/check_md.sh test/roms/md/cadillacs_md.md analysis/mame/check 7200 600
 ```
@@ -211,4 +210,4 @@ Pad: A = coin, Start = start, B = attack, C = jump.
 
 The ROM is 6 MB and uses the Sega/Krikzz SSF mapper, which its header announces (`SEGA SSF`). MAME enables bank switching only for a software-list entry: `tools/run_md.sh` writes one with slot type `rom_titan` (the Krikzz SSF mapper, 32 banks); MAME 0.289's `rom_ssf2` type implements only the 10 banks Super Street Fighter II used. Other emulators and flash carts read the header.
 
-The current build shows the sprites, the playfield and the far background. There is no HUD or sound. The game runs close to full speed; sprites animate at 30 Hz. It has been run in MAME's Mega Drive driver only. Do not run it on a real console or flash cart yet: it still writes to arcade tilemap addresses, which a real Mega Drive does not tolerate.
+The current build (0.1.0-alpha) shows the sprites, the playfield and the far background. There is no HUD or sound; the known issues are listed in the README. It has been run in emulators only.

@@ -7,7 +7,6 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 ## Ground rules
 
 - **No game data in the repo.** No ROMs, no extracted graphics or sound, no disassembly or decompiler output, no screenshots of the games. `*.zip`, `*.bin` and `/analysis/` are ignored; keep it that way. The user supplies their own ROMs.
-- **Commits go through Docker as Evilu.** `docker exec -u dev cadillacs-git sh -c 'cd /work && git ...'`. The project folder is mounted at `/work`. Plain commit messages with no AI co-author or attribution lines. Commit and push when asked.
 - **Measure, then write.** Every number in `docs/` was computed from a ROM, a trace or a cited source. Re-derive before repeating a figure, say what was not measured, and correct the docs when a measurement turns out wrong.
 - **Stage 1 only so far.** All traces cover stage 1 under scripted play. Do not generalise to later stages.
 - **Extracted archives are untrusted.** Unpack into their own folder under `analysis/roms/`, keep scripts in `tools/`, run Python that reads them with `-I`.
@@ -21,7 +20,7 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 | `docs/` | Research documents and the port plan |
 | `src/hal.s` | The Mega Drive hardware layer: boot, VBlank, sprites, palettes, input (GNU as, Motorola operand syntax, `\|` comments) |
 | `src/background.s` | Playfield store, plane B ring, tile cache, and the TRAP #8 instruction emulator |
-| `tools/build/build.py` | Builds the Mega Drive ROM from the user's program image |
+| `build_md.py` | Builds the Mega Drive ROM from the user's `dino.zip` (calls `tools/build/build.py`) |
 | `test/roms/md/` (ignored) | Built ROMs for the user to try |
 | `tools/prep_roms.py` | Builds flat program and graphics images from ROM sets |
 | `tools/ghidra/` | Headless Ghidra import, seeding and C export |
@@ -61,7 +60,7 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 
 **The build**
 
-- Build with `analysis/venv/bin/python3 -I tools/build/build.py analysis/work/dino_prg.bin analysis/work/dino_gfx.bin analysis/mame/dino_access/access_pcs.csv test/roms/md/cadillacs_md.md`. The output contains Capcom's program and graphics: never commit it. Name ROMs `.md`: emulators pick the system from the extension.
+- Build with `analysis/venv/bin/python3 -I build_md.py dino.zip test/roms/md/cadillacs_md.md`. It verifies the set by CRC and reads the patch sites from `tools/build/dino_access.csv` (addresses only, from the stage-1 access map; regenerate it from a new trace when the map grows). The output contains Capcom's program and graphics: never commit it. Name ROMs `.md`: emulators pick the system from the extension.
 - Hardware accesses with fixed addresses are redirected to shadows at `0xFF1000` (I/O and video registers), `0xFF1200` (sound) and `0xFF1280` (player 3, EEPROM). The game's start-up clears that RAM, so the hardware layer rewrites its inputs every VBlank.
 - Stand-in DIP switches must read `0xFF`; a zero in DIP C bit 7 sends the game into test mode.
 - **Mapper in MAME.** MAME enables bank switching only for a software-list entry; `tools/run_md.sh` writes one with slot `rom_titan` (Krikzz SSF, 32 banks). The `rom_ssf2` type implements only banks 0–9 and segfaults above. Use byte writes to the bank registers (`0xA130FF`); word writes crashed MAME.

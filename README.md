@@ -2,19 +2,81 @@
 
 A port of Capcom's 1993 CPS-1 arcade game *Cadillacs and Dinosaurs* to the Sega Mega Drive / Genesis.
 
-Work in progress.
+The Mega Drive runs Capcom's own 68000 program; only the hardware layer underneath it is replaced (video, palettes, input, memory map). The goal is a version as close to the arcade as the console allows, at 60 frames a second.
 
-## Research
+**Status: 0.1.0-alpha.** Stage 1 is playable in emulators, with known issues (below). There is no sound yet.
+
+## ROMs
+
+This repository contains no ROM data. To build, you supply your own dump of the arcade ROM set: you bring a copy of the game you own, and the build turns it into a Mega Drive ROM on your own machine.
+
+## What you need
+
+- **Your own dump of the arcade game:** MAME's `dino` set (*Cadillacs and Dinosaurs*, World 930201), as `dino.zip` or as a folder of its files. The build checks the eleven files it uses by size and CRC32 and tells you which one is missing or wrong. Clones (`dinou`, `dinoj`, `dinohack` and so on) are not supported.
+- **Python 3.9 or newer**, with `numpy` and `capstone` (`requirements.txt`).
+- **GNU binutils for the 68000** (`as`, `ld`, `objcopy`, `nm`):
+  - macOS: `brew install m68k-elf-binutils`
+  - Debian / Ubuntu: `sudo apt install binutils-m68k-linux-gnu`
+  - other: any 68000 binutils; set `M68K_PREFIX` to the tool prefix (for example `M68K_PREFIX=m68k-elf-`).
+- **An emulator with the Sega SSF mapper**: the ROM is 6 MB and banks its graphics through the extended Sega mapper its header announces (`SEGA SSF`). Tried in MAME and ares; BlastEm reads the same header but has not been checked.
+
+## Build
+
+```sh
+git clone https://github.com/Evilu/cadillacs-and-dinosaurs-md.git
+cd cadillacs-and-dinosaurs-md
+python3 -m venv .venv
+.venv/bin/python3 -m pip install -r requirements.txt
+.venv/bin/python3 build_md.py /path/to/dino.zip
+```
+
+The ROM is written to `out/cadillacs_md.md`; a second argument chooses another path. Keep the `.md` extension: some emulators pick the console from it (ares took a `.bin` for an Atari 2600 game). The built ROM contains Capcom's program and graphics: do not share it.
+
+## Play
+
+- **ares** (or BlastEm, unchecked): open `out/cadillacs_md.md`.
+- **MAME:** plain `-cart` loading does not switch the mapper on. Use `tools/run_md.sh out/cadillacs_md.md <work folder>`, which writes a one-entry software list that does.
+
+Pad: **A** inserts a coin, **Start** starts, **B** attacks, **C** jumps. One player.
+
+## Known issues (0.1.0-alpha)
+
+Everything here was seen or measured in stage 1 under scripted play in MAME. Later stages have not been played.
+
+**Missing**
+- No sound or music.
+- No text layer: the HUD (score, health bars, names), the title and select screen text, the player panels and "insert coin" are not drawn.
+- Only one player has been tried.
+
+**Speed**
+- Sprites are converted every second frame, and every third or fourth when the game falls behind, so they animate at 30 Hz or less.
+- Brawls with many enemies run at about 42–58 game frames a second instead of 60.
+- Scene changes and doors opening can stall the game for a few frames while background colours are worked out again.
+- The select screen stutters while it loads.
+
+**Colours**
+- Both background layers share one 15-colour palette line, so their colours are approximations of the arcade's.
+- Sprites have three palette lines. A fourth sprite palette on screen borrows the closest line: some enemies, especially ones fading in, show wrong colours.
+- The select screen briefly shows the previous scene's colours on the way into the stage.
+
+**Graphics**
+- The title logo is missing a few of its 56 pieces.
+- The logo and the select portraits overlap for a moment between the title and select screens.
+- Barrels sometimes lose pieces or show green stripes.
+- When the tile caches run out, a few background cells can stay blank for up to a second.
+
+**Hardware**
+- Never run on a real console or flash cart. Do not try yet: some code paths still touch arcade addresses that a real Mega Drive may not tolerate.
+
+## Development
+
+From here on, changes go through branches and pull requests: one branch per change, a pull request into `main`, and a test ROM built and played before merging. The research behind the port, the measurements and the plan are in `docs/`; how to trace the arcade and check a build is in `tools/README.md`.
 
 - [CPS-1 vs Mega Drive architecture](docs/01-architecture-cps1-vs-mega-drive.md)
 - [Final Fight: arcade vs Final Fight MD](docs/02-final-fight-arcade-vs-md.md)
 - [Cadillacs and Dinosaurs, measured](docs/03-cadillacs-and-dinosaurs-measured.md)
-- [Port plan](docs/04-port-plan.md)
+- [Port plan and milestone status](docs/04-port-plan.md)
 - [Analysis tools](tools/README.md)
-
-## ROMs
-
-This repository contains no ROM data. To build, you supply your own dump of the arcade ROM set.
 
 ## Rights
 

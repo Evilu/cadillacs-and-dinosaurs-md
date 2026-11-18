@@ -24,3 +24,4 @@ roms/
 
 # built ROMs contain the user-supplied game program
 /test/roms/
+.venv/
