@@ -82,3 +82,25 @@ tools/check_md.sh <rom.bin> <out dir> [frames] [snapshot every N frames]
 
 Runs the ROM headless in MAME's `genesis` driver with no input and reports whether the CPU is running, plus picture width, sprites, colours, the largest per-frame DMA and sprite-limit overflow. Snapshots and VDP dumps land in the output folder. BlastEm (`brew install blastem`) is the choice for hands-on testing; it needs a window.
 
+## 7. Map hardware accesses and RAM use
+
+```sh
+TRACE_OUT=dino_access TRACE_FRAMES=21600 RAM_FROM_FRAME=300 \
+  mame dino -rompath <rom folders> -video none -sound none -skip_gameinfo -nothrottle \
+  -seconds_to_run 400 -autoboot_script ../../tools/mame/cps1_access.lua
+```
+
+Writes `access_pcs.csv` (every instruction that read or wrote arcade I/O, GFX RAM or the sound and EEPROM ports, with counts and address range) and `ram_written.bin` (which work RAM bytes were written).
+
+## 8. Build and probe the Mega Drive ROM
+
+```sh
+analysis/venv/bin/python3 -I tools/build/build.py analysis/work/dino_prg.bin \
+  analysis/mame/dino_access/access_pcs.csv test/roms/md/cadillacs_md.bin
+TRACE_FRAMES=3600 STATE_EVERY=300 PRESS="700:A,800:Start,1000:B,1600:Right" \
+  mame genesis -cart test/roms/md/cadillacs_md.bin -video none -sound none -skip_gameinfo -nothrottle \
+  -seconds_to_run 90 -autoboot_script tools/mame/md_state.lua
+```
+
+`build.py` needs `capstone` and the `m68k-elf` binutils. `md_state.lua` prints the arcade kernel's task slots, the shadow video registers and player state while pressing pad buttons at the given frames.
+

@@ -2,7 +2,7 @@
 
 A port of Capcom's CPS-1 arcade game *Cadillacs and Dinosaurs* (MAME set `dino`, World 930201) to the Sega Mega Drive. The plan is to run Capcom's original 68000 program on the Mega Drive's 68000 and replace only the hardware layer. Target: as close to the arcade as the console allows, at 60 fps.
 
-Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final Fight arcade vs Final Fight MD, 03 Cadillacs and Dinosaurs measured.
+Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final Fight arcade vs Final Fight MD, 03 Cadillacs and Dinosaurs measured, 04 the port plan and milestone status.
 
 ## Ground rules
 
@@ -18,10 +18,13 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 
 | Path | Contents |
 |---|---|
-| `docs/` | Research documents |
+| `docs/` | Research documents and the port plan |
+| `src/hal.s` | The Mega Drive hardware layer (GNU as, Motorola operand syntax, `\|` comments) |
+| `tools/build/build.py` | Builds the Mega Drive ROM from the user's program image |
+| `test/roms/md/` (ignored) | Built ROMs for the user to try |
 | `tools/prep_roms.py` | Builds flat program and graphics images from ROM sets |
 | `tools/ghidra/` | Headless Ghidra import, seeding and C export |
-| `tools/mame/` | Lua scripts: arcade trace, arcade profiler, Mega Drive VDP trace |
+| `tools/mame/` | Lua scripts: arcade trace, profiler and hardware access map; Mega Drive VDP trace and game-state probe |
 | `tools/analysis/` | Trace summaries, profile report, VDP dump renderer, 68000 disassembler |
 | `tools/check_md.sh` | One-command headless check of a Mega Drive ROM |
 | `analysis/` (ignored) | `roms/`, `work/` images, `ghidra/` projects, `out/` exports, `mame/` runs, `venv/` |
@@ -30,7 +33,7 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 
 ## Environment
 
-- MAME 0.289 and BlastEm 1.0.0 from Homebrew. Ghidra needs `JAVA_HOME=/opt/homebrew/opt/openjdk@21`.
+- MAME 0.289, BlastEm 1.0.0 and `m68k-elf-binutils` from Homebrew. Ghidra needs `JAVA_HOME=/opt/homebrew/opt/openjdk@21`.
 - Python helpers that need `capstone` or `Pillow` run from `analysis/venv/bin/python3`.
 - MAME needs `qsound.zip` (containing `dl-1425.bin`, CRC `d6cf5ef5`) to run `dino`. A correctly named copy lives in `analysis/mame/qsound_rom/`; pass `-rompath "qsound_rom;../.."` from `analysis/mame`.
 
@@ -53,6 +56,15 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 - 128,000 CPU cycles per NTSC frame; about 7.3 KB of DMA per VBlank; 80 sprites, 20 per line, 320 sprite pixels per line; 61 colours.
 - Final Fight MD is a from-scratch SGDK rewrite with no arcade code. It is the reference for layer mapping, palettes, sprite cutting and VRAM layout, not for code.
 - Its recipe: street on plane B with high priority, far background on plane A with low priority, HUD in the window, one 15-colour palette for the background, static scenery drawn as plane tiles, patterns stored in spare table space, no raster effects.
+
+**The build**
+
+- Build with `analysis/venv/bin/python3 -I tools/build/build.py analysis/work/dino_prg.bin analysis/mame/dino_access/access_pcs.csv test/roms/md/cadillacs_md.bin`. The output contains Capcom's program: never commit it.
+- Hardware accesses with fixed addresses are redirected to shadows at `0xFF1000` (I/O and video registers), `0xFF1200` (sound) and `0xFF1280` (player 3, EEPROM). The game's start-up clears that RAM, so the hardware layer rewrites its inputs every VBlank.
+- Stand-in DIP switches must read `0xFF`; a zero in DIP C bit 7 sends the game into test mode.
+- Take hardware-layer addresses from the linker's symbol table. GNU as shortens `jmp label`, so fixed-offset jump tables do not work.
+- Verify a build by reading the game's own state with `tools/mame/md_state.lua` (task slots, shadow registers, player state) and comparing with the arcade; a black screen says nothing yet.
+- The access map misses some executed instructions. Patch from it first, then statically.
 
 **Tooling**
 

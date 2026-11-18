@@ -21,3 +21,6 @@ out/
 
 # local analysis output (extracted ROMs, disassembly, traces)
 /analysis/
+
+# built ROMs contain the user-supplied game program
+/test/roms/

@@ -9,6 +9,7 @@ Work in progress.
 - [CPS-1 vs Mega Drive architecture](docs/01-architecture-cps1-vs-mega-drive.md)
 - [Final Fight: arcade vs Final Fight MD](docs/02-final-fight-arcade-vs-md.md)
 - [Cadillacs and Dinosaurs, measured](docs/03-cadillacs-and-dinosaurs-measured.md)
+- [Port plan](docs/04-port-plan.md)
 - [Analysis tools](tools/README.md)
 
 ## ROMs
