@@ -13,8 +13,8 @@
     .equ S2_END,        0x910000
     .equ S2_STORE,      0xff4000    | (col << 5 | row & 31) * 4: code word, attribute word
     .equ PLANE_B,       0xc000
-    .equ S2_OWN,        128         | slots in patterns 0x220-0x41f
-    .equ S2_SLOTS,      160         | with 8 groups of 4 that sit in far background slots while those are free
+    .equ S2_OWN,        127         | slots in patterns 0x220-0x41b (0x41c-0x41f belong to the HUD)
+    .equ S2_SLOTS,      159         | with 8 groups of 4 that sit in far background slots while those are free
     .equ S2_W,          22          | columns drawn: one hidden on the left, then the 21 the screen can show
     .equ S2_PATTERN,    0x220       | first VRAM pattern of the playfield tile cache
     .equ HASH,          0xff7000    | 256 entries: tile code (0xffff empty), slot
@@ -1009,8 +1009,10 @@ hal_attr:
 
 | d0 24-bit address in arcade video RAM -> d1 word
 gfx_read_w:
-    cmpi.l  #S2_BASE, d0
+    cmpi.l  #S1_BASE, d0
     blo.s   1f
+    cmpi.l  #S2_BASE, d0
+    blo.w   s1_read
     cmpi.l  #S2_END, d0
     bhs.s   2f
     bra.w   s2_read
@@ -1022,8 +1024,10 @@ gfx_read_w:
 
 | d0 24-bit address in arcade video RAM, d1 word
 gfx_write_w:
-    cmpi.l  #S2_BASE, d0
+    cmpi.l  #S1_BASE, d0
     blo.s   1f
+    cmpi.l  #S2_BASE, d0
+    blo.w   s1_write
     cmpi.l  #S2_END, d0
     bhs.s   2f
     bra.w   s2_write
@@ -1102,7 +1106,11 @@ hal_fill:
     blo.w   3f
     cmpi.l  #GFX_HI, d2
     bhs.w   3f
-    cmpi.l  #S2_BASE, d2
+    cmpi.l  #S1_BASE, d2
+    bne.s   10f
+    bsr.w   hud_fill
+    bra.w   2f
+10: cmpi.l  #S2_BASE, d2
     bne.s   5f
     move.w  d0, s2_fill_code
     move.w  d1, s2_fill_attr

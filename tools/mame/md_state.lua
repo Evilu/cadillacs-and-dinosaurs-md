@@ -29,6 +29,11 @@ sub = emu.add_machine_frame_notifier(function()
       frame, cpu.state["PC"].value, prog:read_u32(0xff12c0), prog:read_u8(0xff84cc), prog:read_u8(0xffb274),
       prog:read_u8(0xff84d9), prog:read_u16(0xffb27c)))
     print("   task slots: " .. table.concat(slots, " "))
+    local maps, shown = {}, 0
+    for i = 0, 7 do maps[#maps + 1] = string.format("%02x", prog:read_u8(0xff175c + i)) end
+    for i = 0, 12 do if prog:read_u8(0xff172e + i) > 0 then shown = shown + 1 end end
+    print(string.format("   hud: draws put off %d  pen maps %s  sprites shown %d  line %d",
+      prog:read_u16(0xff176e), table.concat(maps, " "), shown, prog:read_u16(0xff1766)))
     print("   registers:  " .. table.concat(regs, " "))
   end
   if frame >= max_frames then manager.machine:exit() end

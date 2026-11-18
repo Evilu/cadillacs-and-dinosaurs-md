@@ -47,6 +47,7 @@ TRACE_OUT=ffmd_run TRACE_FRAMES=21600 TRACE_SNAP_EVERY=300 \
 | Script | Does |
 |---|---|
 | `mame/cps1_trace.lua` | Per frame: sprite list, visible tilemap cells, palettes in use, and the graphics working set in Mega Drive 8×8 patterns (blank cells skipped, checked against the graphics ROM), plus a VRAM-sized cache model. Plays the game by script. `LAYER_CTRL` and `LAYER_MASKS` are the CPS-B layer-control offset and enable masks from MAME's `cps1_v.cpp` (`dino`: `0a`, `16,16,16`). `IDLE_FLAG` is the frame flag the game's scheduler polls once per task slot (`ffight`: `ff1100`, `dino`: `ff0152`); reads per frame give the time the CPU spent waiting |
+| `mame/cps1_scroll1.lua` | Scroll 1 (text layer) probe for `dino`: per frame its scroll position, visible and changed cells, patterns, palettes and the colours drawn (pens used); over the run, how often each of the 48 × 28 screen cells shows a pattern, and for the HUD band (`BAND_ROWS`, default 5) the distinct pattern and palette pairs per frame and every attribute word. `GRID_EVERY=n` writes the screen's tile codes every n frames. Same play script as `cps1_trace.lua` |
 | `mame/md_trace.lua` | Decodes every 68000 write to the VDP: DMA size, target and source, fills, copies, CRAM and register writes, writes during active display. Keeps its own VRAM and CRAM copies (MAME does not expose the real VRAM to Lua), walks the sprite table each frame, and dumps VRAM, CRAM and registers at snapshot frames. Plays the game by script |
 
 `dino` also needs MAME's QSound DSP ROM set (`qsound.zip`, containing `dl-1425.bin`) on the ROM path. For `dino`, summarise with `--broad --clock 12e6 --poll-cycles 97.5`.
@@ -80,7 +81,7 @@ The `idle_reads` column of `cps1_trace.lua` and the CPU-load lines of `summarise
 tools/check_md.sh <rom.bin> <out dir> [frames] [snapshot every N frames]
 ```
 
-Runs the ROM headless in MAME's `genesis` driver (through `tools/run_md.sh`, which enables the mapper) with no input and reports whether the CPU is running, plus picture width, sprites, colours, the largest per-frame DMA and sprite-limit overflow. Snapshots and VDP dumps land in the output folder. BlastEm (`brew install blastem`) is the choice for hands-on testing; it needs a window.
+Runs the ROM headless in MAME's `genesis` driver (through `tools/run_md.sh`, which enables the mapper) with no input and reports whether the CPU is running, plus picture width, sprites, colours, the largest per-frame DMA and sprite-limit overflow. Snapshots and VDP dumps land in the output folder, with `md_vram_free.txt` listing the VRAM patterns never written after `WATCH_FROM` (default frame 300). `RAM_WATCH=ff1cb0-ff1fff` adds the lowest address written in that range (the hardware layer's stack depth); `HOLD_HEALTH=1` keeps player 1 alive to reach later scenes. BlastEm (`brew install blastem`) is the choice for hands-on testing; it needs a window.
 
 ## 7. Map hardware accesses and RAM use
 

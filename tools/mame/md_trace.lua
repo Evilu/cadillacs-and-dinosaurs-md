@@ -4,19 +4,32 @@
 -- env: TRACE_OUT (directory), TRACE_FRAMES (frames to run), TRACE_SNAP_EVERY (frames),
 --      TRACE_INPUT=none to leave the pads alone, TRACE_INPUT=arcade for the port
 --      (A = coin at frame 700, Start at 800, then walk and fight)
+--      RAM_WATCH=lo-hi (hex): report the lowest address written in that range (stack depth)
+--      WATCH_FROM: first frame counted by RAM_WATCH and md_vram_free.txt (default 300, after boot)
+--      HOLD_HEALTH=1: keep player 1's health at 100 to reach later scenes
+-- Also writes md_vram_free.txt: the VRAM patterns never written during the run.
 
 local out_dir = os.getenv("TRACE_OUT") or "."
 local max_frames = tonumber(os.getenv("TRACE_FRAMES") or "18000")
 local snap_every = tonumber(os.getenv("TRACE_SNAP_EVERY") or "0")
 
+local hold_health = os.getenv("HOLD_HEALTH") == "1"
+local watch_lo, watch_hi, watch_min
+local watch_from = tonumber(os.getenv("WATCH_FROM") or "300")
+do
+  local lo, hi = string.match(os.getenv("RAM_WATCH") or "", "(%x+)-(%x+)")
+  if lo then watch_lo, watch_hi = tonumber(lo, 16), tonumber(hi, 16) end
+end
 local cpu = manager.machine.devices[":maincpu"]
 local prog = cpu.spaces["program"]
 local vw = {}
 for i = 0, 0x7fff do vw[i] = 0 end
+local touched = {}
 local vram = {}
 function vram:read_u16(a) return vw[(a >> 1) & 0x7fff] end
 local function vram_byte(a, b)
   local i = (a >> 1) & 0x7fff
+  touched[i >> 4] = true
   if a & 1 == 0 then vw[i] = (vw[i] & 0x00ff) | (b << 8) else vw[i] = (vw[i] & 0xff00) | b end
 end
 local function vram_get_byte(a)
@@ -72,6 +85,7 @@ local function do_dma()
       local a = addr
       for i = 0, len - 1 do
         vw[(a >> 1) & 0x7fff] = prog:read_u16((src + i * 2) & 0xffffff)
+        touched[((a >> 1) & 0x7fff) >> 4] = true
         a = a + reg[0x0f]
       end
       local sb = sat_base()
@@ -137,6 +151,7 @@ local function data_write(w)
   if target == 1 then
     f.cpu_vram = f.cpu_vram + 2
     vw[(addr >> 1) & 0x7fff] = w
+    touched[((addr >> 1) & 0x7fff) >> 4] = true
   elseif target == 3 then
     f.cpu_cram = f.cpu_cram + 2
     cram[(addr >> 1) & 63] = w
@@ -288,8 +303,26 @@ local function on_frame()
     d:write(table.concat(parts))
     d:close()
   end
+  if hold_health then prog:write_u16(0xffb2e0, 100) end
+  if t == watch_from then
+    touched = {}
+    watch_min = nil
+  end
   if t >= max_frames then
     csv:close()
+    local vf = io.open(out_dir .. "/md_vram_free.txt", "w")
+    local start = nil
+    for p = 0, 0x800 do
+      if p < 0x800 and not touched[p] then
+        start = start or p
+      elseif start then
+        vf:write(string.format("patterns %03x-%03x (%d)\n", start, p - 1, p - start))
+        start = nil
+      end
+    end
+    if watch_lo then vf:write(string.format("lowest write in %06x-%06x: %s\n", watch_lo, watch_hi,
+      watch_min and string.format("%06x", watch_min) or "none")) end
+    vf:close()
     local h = io.open(out_dir .. "/md_regs.txt", "w")
     local keys = {}
     for k in pairs(reg_hist) do keys[#keys + 1] = k end
@@ -314,3 +347,8 @@ end
 sub = emu.add_machine_frame_notifier(guard(on_frame))
 tap_vdp = prog:install_write_tap(0xc00000, 0xc00007, "vdp", guard(on_vdp))
 tap_map = prog:install_write_tap(0xa130f0, 0xa130ff, "mapper", guard(on_map))
+if watch_lo then
+  tap_watch = prog:install_write_tap(watch_lo, watch_hi, "watch", function(offset)
+    if not watch_min or offset < watch_min then watch_min = offset end
+  end)
+end

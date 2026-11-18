@@ -45,7 +45,7 @@ Everything here was seen or measured in stage 1 under scripted play in MAME. Lat
 
 **Missing**
 - No sound or music.
-- No text layer: the HUD (score, health bars, names), the title and select screen text, the player panels and "insert coin" are not drawn.
+- Text layer: only the in-game HUD is drawn (player and enemy panels, score, health bars, "insert coin"), with sprites, over the stage as on the arcade. Stage titles, continue and other mid-screen text, and the title and select screen text are not; player 2's full panel and player 3's are left out. HUD colours are the nearest ones in player 1's palette line (lost health shows dark brown, not red), and changed HUD text takes a few frames to appear in full.
 - Only one player has been tried.
 
 **Speed**

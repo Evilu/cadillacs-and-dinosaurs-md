@@ -47,8 +47,9 @@ The hardware layer (`src/hal.s`) boots the console, and on every VBlank fills th
 | Palettes `0x914000–0x914FFF` | RAM at `0xFF3000–0xFF3FFF` |
 | Playfield map (scroll 2) `0x90C000–0x90FFFF` | Store at `0xFF4000` (64 × 32 cells, 8 KB) |
 | Far background map (scroll 3) `0x910000–0x913FFF` | Store at `0xFF6000` (64 × 16 cells, 4 KB) |
-| HUD map (scroll 1) and the rest of GFX RAM | Not handled yet (writes dropped) |
-| Hardware layer's own data | `0xFF12C0–0xFF1C1F`, stack `0xFF1C20–0xFF1FFF`, cache tables `0xFF7000–0xFF7F7F` |
+| HUD map (scroll 1) | Not stored: the HUD band lives in the window's name table in VRAM (see milestone 3) |
+| Rest of GFX RAM | Not handled yet (writes dropped) |
+| Hardware layer's own data | `0xFF12C0–0xFF1CCB` (HUD tables in the sprite and far background tables' gaps), stack `0xFF1CD0–0xFF1FFF`, cache tables `0xFF7000–0xFF7F7F` |
 
 Measured over stage 1, the game writes 41% of its work RAM after boot and leaves one block of about 28 KB untouched (`0xFF0FD3–0xFF7FFF`). The shadows live there. The game's start-up does clear that block once, so anything the hardware layer keeps there is re-established every frame. Whether later stages use the block is not yet measured.
 
@@ -167,9 +168,42 @@ Sprite lists finished per second, same script: opening 20–31 → 44–64; firs
 - **The conversion gap** now moves between two and four frames.
 - Sprite lists per second through the doorway: 36–51 before, 54–62 after. In the brawl that follows (six enemies) the game's own code takes 44% of the CPU and the sprite converter 25%; it runs at 42–58.
 
+**Done (emulator): the in-game HUD of the text layer (scroll 1), drawn with sprites** (`src/hud.s`). The player and enemy panels, score, lives, rank, health bars and the "INSERT COIN" / "JOIN-IN" prompt show in the top 40 pixels during play, in front of the characters and over the stage's sky and skyline, as on the arcade.
+
+What the arcade does (`tools/mame/cps1_scroll1.lua`, 21,600 frames of attract mode and stage 1):
+
+- Scroll 1 sits at x = −64, y = 256 in 99.5% of frames: screen row 0 is map row 34, screen column 0 is map column 0. The in-game HUD uses screen rows 0–4; rows 5–27 carry transient text (stage titles, continue, messages).
+- Three panels of 16 columns: player 1 at columns 0–15, player 2 at 16–31, player 3 at 32–47. A centre crop to 320 pixels would cut player 1's portrait and lives. With one player, player 2's panel shows only a two-row prompt in columns 17–30.
+- Per frame it changes 0 cells at the median (p95 26). The band shows 48 distinct pattern and palette pairs at the median (p95 69, max 76), in 12 palettes over the run. The whole layer draws 29 Mega Drive colours at the median (p95 36).
+- Attribute words in the band use flips (bit 6 on about 16,000 cell-frames) and the priority group bits 7–8.
+- The game reads the layer back: `0x16726`/`0x16730` and `0xF0E0` re-colour cells (attribute read-modify-write); `0x9D704` is a `clr.w`.
+- **Behind the band** (every 30 frames, the 320 pixels the Mega Drive shows): the playfield covers 45% of its pixels and the far background 55%. Where the far background shows at all it fills a median 91% of the band, in about 8 colours, the most common covering 44%: the sky gradient and building tops.
+- **Game sprites in the band:** 42% of frames have some; the busiest band line carries 0 sprite pixels at the median, 48 at p90, 144 at p99.
+
+Why sprites: the window plane replaces plane A, which holds the far background, so a window HUD showed a black bar over the sky; one backdrop colour would have matched only 44% of those pixels. Sprites draw over both planes and in front of the game's sprites. They cost per-line sprite pixels in the top 40 lines, which the game rarely needs there.
+
+How it works:
+
+- **A cell store in RAM** for the 108 cells kept: player 1's panel (16 × 5) and player 2's prompt (14 × 2). A game write updates the store and sets a dirty bit, with no VDP access and no interrupt masking; reads come from the store. Group bits are not kept. Other scroll 1 writes are dropped.
+- **13 fixed sprites**, with one pattern per cell (108 patterns) packed into the last VRAM gaps: `0x001–0x01E`, `0x41C–0x41E` (the playfield cache's last slot: it now has 127), the window table `0x680–0x69F` (the window is off), `0x781–0x79F` (the far background's 41st slot: it now has 40) and `0x7F4–0x7FF`. In 9,000 frames of scripted play only `0x01F` and `0x41F` were never written. The HUD's sprites come first in the sprite table; a sprite whose cells are all blank is left out.
+- **Drawing** happens in VBlank, at most 8 cells a frame: the tile's pattern is read from the converted tiles in ROM, its pens are renumbered through the palette's pen map two pixels at a time, and its flips are applied. A build-time table marks 8 × 8 text patterns without pixels, which are drawn as zeros.
+- **Layout.** Player 1's panel stays at screen columns 0–15, player 2's prompt moves to columns 25–38, player 3's panel is not shown (there is no third pad yet).
+- **Colours.** All four CRAM lines are taken, and an HBlank palette split would jitter because the arcade kernel masks interrupts at level 6. HUD pens are renumbered onto the CRAM line holding player 1's sprite palette, nearest colour first, through up to eight 16-byte pen maps. Measured on 11 arcade palette dumps, the portrait palette is within 0.6 Mega Drive steps per pen of player 1's sprite palette, and the text palettes within about 2 (max 5). Colours are checked every 16 frames, and a change counts only once it has held between two checks: during a fade every palette moves each frame, and recomputing the maps then cost 3–4% of the CPU for nothing. Cells are drawn again only if their map actually changed.
+- **Fast paths.** Once scroll 1 went through `TRAP #8`, it fired 5.2 times a frame. Three traps take the hot sites directly: `TRAP #13` runs the re-colour loop at `0x16726`/`0x16760`, `TRAP #14` writes a character's two words in the three text printers (`0xC34`, `0xC8A`, `0xCC2`), and `TRAP #15` handles four short write runs (`0x8506A`, `0x17A00`, `0x17408`, `0x17660`), found by return address. `TRAP #8` now fires 0.6 times a frame (counted over 70 seconds of unassisted play from frame 1,200).
+- **Cost.** In the PC profile (the same 70 seconds), the HUD code and the trap emulator take 7.4% of the CPU (0.7% without a HUD, 8.7% for the window version), and the game finishes 39 sprite lists a second against 40 without a HUD; scripted play differs between builds, so that difference is within noise. The largest parts are drawing patterns (1.6%) and the store's write path (1.6%). In 9,000 frames of scripted play no draw was put off for want of a pen map, and the hardware layer's stack reached `0xFF1D8E`, 150 bytes above its floor.
+
+How we got here, for the record: the first version used the window plane with an 86-slot pattern cache shared between cells. It showed the HUD but left a black bar over the sky, let characters draw over the HUD, and cost 8.7% of the CPU.
+
+Known gaps:
+
+- Text outside the band (rows 5–27) is not shown, nor the title and select screen text.
+- Player 2's full panel (when a second player joins) and player 3's are not drawn; the VRAM gaps are used up.
+- The HUD's colours are the nearest in player 1's line, so some gradients are flatter than on the arcade, and lost health shows dark brown instead of red (that line has no red).
+- Changed text appears over a few frames: at most 8 cells are drawn per frame, so the 28-cell prompt takes about 4.
+
 Still to do:
 
-- The text layer (scroll 1) in the window: the HUD, and all the text and player panels of the title and select screens. Its writes are currently dropped. VRAM and the hardware layer's RAM are both full, so it needs room made first.
+- The rest of the text layer: stage titles, continue and messages (rows 5–27), the title and select screens.
 - Palettes: the reduction stalls the game when it runs and is visible for a few frames in play; the title and select screens need it tuned.
 - Sprites at 60 Hz again, by replacing Capcom's sprite list builder instead of converting its output.
 
@@ -191,7 +225,7 @@ Still to do:
 
 ## Open problems
 
-- **Where the HUD map lives.** Scroll 1 is 16 KB and does not fit beside the game in work RAM; the playfield and far background fit because the game uses only part of their maps (64 × 32 and 64 × 16 cells). The HUD needs the same measurement.
+- **Where the rest of the text layer lives.** The HUD band needs no store (see milestone 3), but rows 5–27 would need either a store or the window over the whole screen, which hides the far background.
 - **The access map is incomplete.** It comes from one stage-1 play-through, and it missed at least one start-up instruction that reads a DIP switch (found only when the Mega Drive build went into test mode). Static patching covers that case; code that reaches hardware through pointers in unvisited stages is still unknown.
 - **Free RAM across the whole game.** The 28 KB block is a stage-1 result.
 - **CPU bursts.** Whether the saturated moments are all non-interactive.
@@ -210,4 +244,4 @@ Pad: A = coin, Start = start, B = attack, C = jump.
 
 The ROM is 6 MB and uses the Sega/Krikzz SSF mapper, which its header announces (`SEGA SSF`). MAME enables bank switching only for a software-list entry: `tools/run_md.sh` writes one with slot type `rom_titan` (the Krikzz SSF mapper, 32 banks); MAME 0.289's `rom_ssf2` type implements only the 10 banks Super Street Fighter II used. Other emulators and flash carts read the header.
 
-The current build (0.1.0-alpha) shows the sprites, the playfield and the far background. There is no HUD or sound; the known issues are listed in the README. It has been run in emulators only.
+The current build shows the sprites, the playfield, the far background and the in-game HUD. There is no sound; the known issues are listed in the README. It has been run in emulators only.
