@@ -8,9 +8,9 @@
 | writes a 16-byte pen map per arcade palette. Tiles are converted two pixels at
 | a time through 256-entry tables, kept for three palettes at once. It runs when a tile
 | arrives in a palette without a map, or when a mapped palette's colours change,
-| and both layers are then redrawn. A colour that stays in the line keeps its
-| position, so tiles drawn before and after look the same while the redraw,
-| which takes several frames, is under way.
+| and the tiles in VRAM whose palette got a different pen map are then loaded
+| again in place. A colour that stays in the line keeps its position, so most
+| pen maps stay as they were.
 
     .equ LINE_SRC,      0xff79e0    | 16 words: offset in PALETTES of each line colour's source, 0xffff none
     .equ LINE_RAW,      0xff7a00    | 16 words: the arcade colour words of the line this frame
@@ -121,10 +121,18 @@ bgpal_update:
     bne.s   bg_quantise
 9:  rts
 
+| Frame at a5: 0 sources, 30 keys, 60 positions, 78 count of the colours picked;
+| 80 per palette, nonzero if its pen map changed; 144 the pen map index and 208
+| the pen maps as they were.
 bg_quantise:
-    lea     -80(sp), sp
+    lea     -464(sp), sp
     movea.l sp, a5
     clr.w   q_request
+    lea     PM_INDEX, a0
+    lea     144(a5), a1
+    moveq   #79, d0
+0:  move.l  (a0)+, (a1)+
+    dbra    d0, 0b
     move.l  #0xffffffff, LUT_PAL
     lea     QCOUNT, a0
     moveq   #63, d0
@@ -445,19 +453,79 @@ q_tables:
     cmpi.w  #3, d7
     blt.w   q_tables
 q_done:
-    bsr.s   q_signature
+    bsr.w   q_signature
     move.l  d0, q_sig
-    lea     S2_REF, a0
-    moveq   #S2_SLOTS - 1, d0
-1:  ori.w   #0x400, (a0)+
-    dbra    d0, 1b
-    lea     S3_REF, a0
-    moveq   #S3_SLOTS - 1, d0
-2:  ori.w   #0x400, (a0)+
+    moveq   #0, d6
+1:  lea     80(a5), a0
+    clr.b   0(a0,d6.w)
+    lea     PM_INDEX, a1
+    moveq   #0, d0
+    move.b  0(a1,d6.w), d0
+    cmpi.b  #0xff, d0
+    beq.s   4f
+    st      0(a0,d6.w)
+    lea     144(a5), a2
+    moveq   #0, d1
+    move.b  0(a2,d6.w), d1
+    cmpi.b  #0xff, d1
+    beq.s   4f
+    lsl.w   #4, d0
+    lea     PENMAP, a1
+    adda.w  d0, a1
+    lsl.w   #4, d1
+    lea     208(a5), a2
+    adda.w  d1, a2
+    moveq   #3, d0
+2:  cmpm.l  (a1)+, (a2)+
+    bne.s   4f
     dbra    d0, 2b
-    move.w  #1, s2_refresh
-    move.w  #1, s3_refresh
-    lea     80(sp), sp
+    clr.b   0(a0,d6.w)
+4:  addq.w  #1, d6
+    cmpi.w  #64, d6
+    blt.s   1b
+
+    moveq   #0, d6
+5:  move.w  d6, d0
+    add.w   d0, d0
+    lea     S2_REF, a0
+    move.w  0(a0,d0.w), d1
+    move.w  d1, d2
+    andi.w  #0x3ff, d2
+    beq.s   6f
+    rol.w   #5, d1
+    andi.w  #31, d1
+    tst.b   80(a5,d1.w)
+    beq.s   6f
+    move.w  d1, r_attr
+    lea     S2_KEY, a0
+    move.w  0(a0,d0.w), d0
+    move.w  d6, d5
+    bsr.w   upload_tile
+6:  addq.w  #1, d6
+    cmpi.w  #S2_SLOTS, d6
+    blt.s   5b
+    moveq   #0, d6
+7:  move.w  d6, d0
+    add.w   d0, d0
+    lea     S3_REF, a0
+    move.w  0(a0,d0.w), d1
+    move.w  d1, d2
+    andi.w  #0x3ff, d2
+    beq.s   8f
+    rol.w   #5, d1
+    andi.w  #31, d1
+    tst.b   112(a5,d1.w)
+    beq.s   8f
+    move.w  d1, t_pal
+    lea     S3_KEY, a0
+    move.w  d0, d1
+    move.w  0(a0,d1.w), d0
+    move.w  d6, d5
+    bsr.w   s3_upload
+8:  addq.w  #1, d6
+    cmpi.w  #S3_SLOTS, d6
+    blt.s   7b
+    lea     464(sp), sp
     rts
 
 | -> d0 checksum of the colours (without brightness) of every mapped palette

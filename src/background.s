@@ -43,6 +43,7 @@
     .equ r_attr,        BG_VARS + 24
     .equ s2_fill_code,  BG_VARS + 32    | what the game last filled the whole map with
     .equ s2_fill_attr,  BG_VARS + 34
+    .equ s2_wipe,       BG_VARS + 40    | the game filled the map with a blank tile
     .equ dirty_cols,    BG_VARS + 36    | bit per ring column with more changes than the list holds
     .equ s2_refresh,    BG_VARS + 30    | redraw every cell of the window in place
     .equ ARCADE_FILL_END, 0x000ba8
@@ -473,7 +474,23 @@ update_scroll2:
     beq.w   full_redraw
     tst.w   s2_full
     bne.w   full_redraw
-    tst.w   s2_refresh
+    tst.w   s2_wipe
+    beq.s   9f
+    clr.w   s2_wipe
+    move.w  #31, u_count
+10: move.w  u_count, d3
+    bsr.w   clear_column
+    subq.w  #1, u_count
+    bpl.s   10b
+    move.w  #PLANE_B, d0
+    bsr.w   vram_write_at
+    lea     VDP_DATA, a1
+    moveq   #0, d1
+    move.w  #1023, d0
+11: move.l  d1, (a1)
+    dbra    d0, 11b
+    bra.w   update_scroll2
+9:  tst.w   s2_refresh
     beq.s   6f
     clr.w   s2_refresh
     clr.w   dirty_count
@@ -887,9 +904,9 @@ hal_fill:
     move.l  a0, d2
     andi.l  #0xffffff, d2
     cmpi.l  #GFX_LO, d2
-    blo.s   3f
+    blo.w   3f
     cmpi.l  #GFX_HI, d2
-    bhs.s   3f
+    bhs.w   3f
     cmpi.l  #S2_BASE, d2
     bne.s   5f
     move.w  d0, s2_fill_code
@@ -903,8 +920,17 @@ hal_fill:
     moveq   #63, d3
 7:  clr.l   (a2)+
     dbra    d3, 7b
+    clr.w   dirty_count
+    clr.l   dirty_cols
     move.w  #1, s2_refresh
-    bra.s   2f
+    tst.w   d0
+    bmi.s   8f
+    lea     TILE_FLAGS, a2
+    tst.b   0(a2,d0.w)
+    bne.w   2f
+8:  clr.w   s2_refresh
+    move.w  #1, s2_wipe
+    bra.w   2f
 5:  cmpi.l  #S3_BASE, d2
     bne.s   2f
     lea     S3_STORE, a2
@@ -912,7 +938,16 @@ hal_fill:
 6:  move.w  d0, (a2)+
     move.w  d1, (a2)+
     dbra    d3, 6b
+    clr.w   s3_dirty
+    clr.w   s3_dirty_cols
     move.w  #1, s3_refresh
+    cmpi.w  #0x1fff, d0
+    bhi.s   9f
+    lea     TILE_FLAGS3, a2
+    tst.b   0(a2,d0.w)
+    bne.s   2f
+9:  clr.w   s3_refresh
+    move.w  #1, s3_wipe
 2:  movea.l a1, a0
     bra.s   4f
 3:  move.w  d0, (a0)+

@@ -41,6 +41,7 @@
     .equ s3_last_y,     S3_VARS + 100
     .equ t_pal,         S3_VARS + 102
     .equ s3_dirty_cols, S3_VARS + 104
+    .equ s3_wipe,       S3_VARS + 106
     .equ TILE_FLAGS3,   0x1a0000    | per 32 x 32 tile code 0-0x1fff: nonzero if it has pixels
     .equ TILE3_DATA,    TILE_DATA   | 32 x 32 tile c: 16 patterns (column-major) at TILE3_DATA + c * 512
 
@@ -446,7 +447,23 @@ update_scroll3:
     beq.w   3f
     tst.w   s3_full
     bne.w   3f
-    tst.w   s3_refresh
+    tst.w   s3_wipe
+    beq.s   29f
+    clr.w   s3_wipe
+    move.w  #15, s3_count
+27: move.w  s3_count, d3
+    bsr.w   clear_column3
+    subq.w  #1, s3_count
+    bpl.s   27b
+    move.w  #PLANE_A, d0
+    bsr.w   vram_write_at
+    lea     VDP_DATA, a1
+    moveq   #0, d1
+    move.w  #1023, d0
+28: move.l  d1, (a1)
+    dbra    d0, 28b
+    bra.w   update_scroll3
+29: tst.w   s3_refresh
     beq.s   21f
     clr.w   s3_refresh
     clr.w   s3_dirty

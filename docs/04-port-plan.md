@@ -134,7 +134,7 @@ What the measurements showed and how it works:
 - **The backgrounds' colours are reduced to 15 at run time.** The hardware layer counts the palettes of every cell in both stores, lists their distinct colours to Mega Drive precision, and picks 15 by repeatedly taking the colour with the largest distance to those already picked times its use. An offline prototype of the same method on two dumps is close to the arcade picture; with 15 colours per layer it is closer still, but that leaves sprites two lines.
 - **Tile pixels are renumbered as they are loaded into VRAM,** through a 16-byte pen map per arcade palette; the three most used palettes get a 256-byte table that converts two pixels at a time (7 instructions per word against about 20).
 - **The cache key includes the palette:** the game draws floor shadows by reusing a tile with a darker palette.
-- **When it runs:** when a tile with an unmapped palette is written to a store (the game writes about 32 columns ahead of the camera) and when a mapped palette's colours change. A colour that stays keeps its position in the line, slots are reloaded in place, and both windows are redrawn over several frames. In 70 seconds of scripted play it ran 9 times before the game starts and 4 times in stage 1. Each run stalls the game for several frames; the title and select screens run at 13–30 sprite lists a second because of it.
+- **When it runs:** when a tile with an unmapped palette is written to a store (the game writes about 32 columns ahead of the camera) and when a mapped palette's colours change, checked every 32 frames. A colour that stays keeps its position in the line, and only tiles whose pen map changed are reloaded. In 70 seconds of scripted play it ran 9 times before the game starts and 4 times in stage 1. Each run stalls the game for several frames; the title and select screens run at 13–30 sprite lists a second because of it.
 - **The map fill counts for both halves.** The title fills the whole playfield map with one green tile; the half a store cell does not hold reads back as the last fill, not as empty.
 - **Sprite cache sets overflow.** The title logo is 56 pieces; 6 were dropped because their 4-way set was full of pieces in use. A piece now falls back to the next set (52 of 56 drawn).
 - **Sprites:** a line keeps its palette while it is on screen; the players' palettes always get one. With three lines the player and two enemy palettes are exact in stage 1's first scenes.
@@ -155,7 +155,9 @@ The instruction budget is the hard constraint. The Mega Drive's 68000 executes a
 - **Cells that get no slot are retried.** In the opening pan the playfield cache runs out (0 of 128 free); the cells stayed blank until redrawn. They now go back on the change list and fill in within about 40 frames.
 - **The palette check runs every 32 frames** instead of 8.
 
-Sprite lists finished per second, same script: opening 20–31 → 44–64; first fights 43–51 → 49–58; later play 56–59 → 59–60. The select screen still stalls while it loads (24–51 of 60 VBlanks handled): the game draws it in bursts and each new palette triggers the reduction and a window redraw.
+Sprite lists finished per second, same script: opening 20–31 → 44–64; first fights 43–51 → 49–58; later play 56–59 → 59–60. 
+
+**Select-screen load.** While it loaded, 24–51 of every 60 VBlanks were handled. Two changes: after a reduction, only the tiles in VRAM whose palette's pen map changed are loaded again, in place, and no cell is redrawn; and when the game fills a map with a blank tile, the plane is wiped with one VRAM fill and every slot released. In the same five seconds 57, 60, 42, 41 and 60 VBlanks are now handled; what remains is tile loading and the reduction itself.
 
 Still to do:
 
