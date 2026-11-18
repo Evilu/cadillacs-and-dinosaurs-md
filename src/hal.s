@@ -378,8 +378,13 @@ row_loop:
     bge.w   row_next
     move.w  e_row, d0
     lsl.w   #4, d0
+    move.w  d5, d1
+    andi.w  #0xfff0, d1
+    add.w   d1, d0
     movea.w d0, a5
     moveq   #0, d4
+    btst    #5, e_flip + 1
+    bne.w   col_loop_flip
 col_loop:
     move.w  d5, d0
     add.w   d4, d0
@@ -392,19 +397,10 @@ col_loop:
     cmp.w   d7, d1
     bge.s   6f
     moveq   #1, d6
-6:  move.w  d5, d1
-    andi.w  #0xfff0, d1
-    or.w    d1, d0
-    add.w   a5, d0
+6:  add.w   a5, d0
     bmi.w   col_next
     move.w  d4, d2
-    btst    #5, e_flip + 1
-    beq.s   7f
-    move.w  d7, d2
-    subq.w  #1, d2
-    sub.w   d4, d2
-    sub.w   d6, d2
-7:  lsl.w   #4, d2
+    lsl.w   #4, d2
     add.w   a4, d2
     cmpi.w  #128 - 32, d2
     ble.w   col_next
@@ -479,6 +475,100 @@ col_next:
     add.w   d6, d4
     cmp.w   d7, d4
     blt.w   col_loop
+    bra.w   row_next
+col_loop_flip:
+    move.w  d5, d0
+    add.w   d4, d0
+    andi.w  #15, d0
+    moveq   #0, d6
+    cmpi.w  #15, d0
+    beq.s   6f
+    move.w  d4, d1
+    addq.w  #1, d1
+    cmp.w   d7, d1
+    bge.s   6f
+    moveq   #1, d6
+6:  add.w   a5, d0
+    bmi.w   col_next_flip
+    move.w  d7, d2
+    subq.w  #1, d2
+    sub.w   d4, d2
+    sub.w   d6, d2
+    lsl.w   #4, d2
+    add.w   a4, d2
+    cmpi.w  #128 - 32, d2
+    ble.w   col_next_flip
+    cmpi.w  #448, d2
+    bge.w   col_next_flip
+    move.b  0(a2,d0.w), d1
+    tst.w   d6
+    beq.s   1f
+    or.b    1(a2,d0.w), d1
+1:  tst.b   d1
+    beq.w   col_next_flip
+    move.w  d0, d1
+    tst.w   d6
+    bne.s   2f
+    ori.w   #0x8000, d1
+2:  move.w  d1, d0
+    lsr.w   #4, d0
+    eor.w   d1, d0
+    lsl.w   #2, d0
+    andi.w  #0x78, d0
+    lea     CACHE_KEY, a3
+    adda.w  d0, a3
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit_flip
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit_flip
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit_flip
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit_flip
+    addq.w  #8, d0
+    andi.w  #0x78, d0
+    lea     CACHE_KEY, a3
+    adda.w  d0, a3
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit_flip
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit_flip
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit_flip
+    cmp.w   (a3)+, d1
+    beq.s   ep_hit_flip
+    move.w  d1, d0
+    andi.w  #0x7fff, d0
+    bsr.w   emit_piece
+    bra.s   ep_done_flip
+ep_hit_flip:
+    subq.l  #2, a3
+    move.w  stamp, 0x100(a3)
+    move.w  a3, d0
+    lsl.w   #2, d0
+    subi.w  #0x5660, d0
+    move.w  a6, d1
+    or.w    d0, d1
+    move.w  d3, (a1)+
+    move.w  a1, d0
+    lsr.w   #3, d0
+    subi.w  #0x263, d0
+    tst.w   d6
+    beq.s   3f
+    ori.w   #0x0d00, d0
+    bra.s   4f
+3:  ori.w   #0x0500, d0
+4:  move.w  d0, (a1)+
+    move.w  d1, (a1)+
+    move.w  d2, (a1)+
+ep_done_flip:
+    cmpa.l  #SAT_BUF + MAX_SPRITES * 8, a1
+    bhs.w   entries_done
+col_next_flip:
+    addq.w  #1, d4
+    add.w   d6, d4
+    cmp.w   d7, d4
+    blt.w   col_loop_flip
 row_next:
     move.w  e_row, d0
     addq.w  #1, d0
