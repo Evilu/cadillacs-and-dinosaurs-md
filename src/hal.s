@@ -1058,6 +1058,16 @@ read_pad:
 8:  move.b  d2, IO_SHADOW + 0x18
     rts
 
+| Capcom's new-game initialiser clears 0xff0e66-0xff7fff; the hardware layer lives from
+| 0xff1000, so only the game's own part is cleared. Leaves d0 zero.
+hal_clear_game_ram:
+    lea     0xff0e66, a0
+    moveq   #0, d0
+1:  move.w  d0, (a0)+
+    cmpa.l  #0xff1000, a0
+    bne.s   1b
+    rts
+
 hal_crash:
     move.w  #0x2700, sr
     move.l  #0xc0000000, VDP_CTRL

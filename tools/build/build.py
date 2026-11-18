@@ -67,6 +67,7 @@ INLINE_PATCHES = [
     (0x00cc96, '7a1f22d851cdfffc', '41e8008043e90080', None),
     (0x0130e4, '41f90090c00034302002', '4eb9{:08x}4e714e71', 'hal_attr'),
     (0x01366a, '41f90090c00034302002', '4eb9{:08x}4e714e71', 'hal_attr'),
+    (0x099f14, '41ed8e667000' '30c0b0fc800066f8', '4eb9{:08x}' + '4e71' * 4, 'hal_clear_game_ram'),
 ]
 FAST_PATH_HANDLERS = {9: 'trap_meta', 10: 'trap_copy', 11: 'trap_fill'}
 SKIPPED_ROUTINES = [
