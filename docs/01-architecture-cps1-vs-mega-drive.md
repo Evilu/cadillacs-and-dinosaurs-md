@@ -41,6 +41,108 @@ Gameplay, input and content can match the arcade. Colour depth, screen width and
 
 The CPU match is what makes the project plausible. Everything else on the list is a hardware layer that must be replaced.
 
+### 1.1 How much of the arcade the Mega Drive has
+
+Each bar is the Mega Drive figure as a percentage of the CPS-1 figure for the same resource.
+
+```mermaid
+xychart-beta horizontal
+    title "Mega Drive capacity as a percentage of CPS-1"
+    x-axis ["Screen width (83%)", "Scrolling tile layers (67%)", "CPU clock (64%)", "CPU time left after VBlank DMA (54%)", "Flat ROM space vs arcade content (52%)", "Video memory (33%)", "Colours on screen (3%)", "Palette entries (2%)"]
+    y-axis "Percent of CPS-1" 0 --> 100
+    bar [83, 67, 64, 54, 52, 33, 3.2, 2.1]
+```
+
+| Resource | CPS-1 (`dino`) | Mega Drive | Ratio |
+|---|---|---|---|
+| Screen width | 384 px | 320 px | 83% |
+| Scrolling tile layers | 3 | 2 | 67% |
+| CPU clock | 12 MHz | 7.67 MHz | 64% |
+| CPU cycles per frame, after a full VBlank DMA | about 201,000 | about 109,000 | 54% |
+| ROM space without a mapper, against arcade content | 7.6 MB of content | 4 MB | 52% |
+| Video memory | 192 KB | 64 KB | 33% |
+| Colours on screen | 1,920 | 61 | 3% |
+| Palette entries | 3,072 | 64 | 2% |
+
+The first five are shortfalls of a third to a half, the kind that optimisation and a mapper can absorb. Colour is a different order of magnitude, which is why it needs offline work per scene and cannot be solved at run time.
+
+### 1.2 Block diagrams
+
+**CPS-1 (CP System Dash, as used by `dino`).** The 68000 sees its video tables as ordinary memory, and the video chips read pixel data from ROM on their own.
+
+```mermaid
+flowchart LR
+    subgraph MAIN["Main CPU side"]
+        CPU["68000<br/>12 MHz"]
+        PRG["Program ROM<br/>1.5 MB"]
+        WRAM["Work RAM<br/>64 KB"]
+        IO["Inputs, coins,<br/>EEPROM"]
+    end
+    subgraph VIDEO["Video"]
+        GRAM["GFX RAM 192 KB<br/>sprite list, 3 tilemaps,<br/>palettes, row scroll"]
+        CPSA["CPS-A<br/>table bases, scroll,<br/>tile and sprite fetch"]
+        GROM["Graphics ROM<br/>4 MB of tile pixels"]
+        CPSB["CPS-B<br/>layer order,<br/>priority masks, palette"]
+        OUT["384x224<br/>59.64 Hz"]
+    end
+    subgraph SOUND["Sound (QSound board)"]
+        SHR["Shared RAM"]
+        Z80["Z80 8 MHz<br/>Kabuki-encrypted"]
+        DSP["QSound DSP<br/>16 PCM voices"]
+        SROM["Sample ROM<br/>2 MB"]
+        SPK["Stereo out<br/>24 kHz"]
+    end
+    CPU --- PRG
+    CPU --- WRAM
+    CPU --- IO
+    CPU -->|"plain memory writes"| GRAM
+    CPU -->|"registers"| CPSA
+    CPU -->|"registers"| CPSB
+    GRAM -->|"read each frame"| CPSA
+    GROM -->|"pixels fetched directly"| CPSA
+    CPSA --> CPSB --> OUT
+    CPU -->|"sound commands"| SHR --- Z80
+    Z80 -->|"voice registers"| DSP
+    SROM --> DSP --> SPK
+```
+
+**Mega Drive.** The VDP owns its memory. The 68000 reaches it only through ports or DMA, and tile pixels must be copied into VRAM before they can be shown.
+
+```mermaid
+flowchart LR
+    subgraph MAIN["Main CPU side"]
+        CPU["68000<br/>7.67 MHz"]
+        ROM["Cartridge ROM<br/>4 MB window,<br/>512 KB banks with mapper"]
+        WRAM["Work RAM<br/>64 KB"]
+        PAD["Controller ports"]
+    end
+    subgraph VIDEO["Video"]
+        VDP["VDP<br/>2 planes, window,<br/>80 sprites"]
+        VRAM["VRAM 64 KB<br/>patterns, name tables,<br/>sprite table, hscroll"]
+        CRAM["CRAM<br/>64 colours"]
+        OUT["320x224<br/>59.92 Hz"]
+    end
+    subgraph SOUND["Sound"]
+        Z80["Z80 3.58 MHz<br/>8 KB RAM"]
+        YM["YM2612<br/>6 FM, or 5 FM + DAC"]
+        PSG["PSG<br/>3 square + noise"]
+        SPK["Stereo out"]
+    end
+    CPU --- ROM
+    CPU --- WRAM
+    CPU --- PAD
+    CPU -->|"ports: address + data"| VDP
+    ROM -->|"DMA, CPU frozen"| VDP
+    WRAM -->|"DMA, CPU frozen"| VDP
+    VDP --- VRAM
+    VDP --- CRAM
+    VDP --> OUT
+    CPU -->|"bus request,<br/>loads driver, sends commands"| Z80
+    ROM -->|"samples through<br/>32 KB bank window"| Z80
+    Z80 --> YM --> SPK
+    Z80 --> PSG --> SPK
+```
+
 ## 2. CPU and code execution
 
 ### 2.1 The same processor
@@ -121,6 +223,18 @@ The problem is the same fact seen from the other side: the game uses all 64 KB o
 
 None of this touches CPS-1 hardware. It uses only standard 68000 features, all of which the Mega Drive has, so the kernel should run unchanged.
 
+```mermaid
+flowchart TD
+    RST["Reset 0x41A<br/>clear RAM, set video registers"] --> INIT["Kernel start-up<br/>create first task"]
+    INIT --> SCHED["Scheduler 0x83C<br/>supervisor mode<br/>walk 16 task slots"]
+    SCHED -->|"slot runnable: RTE"| TASK["Task code<br/>user mode, own stack<br/>game logic, objects, drawing lists"]
+    TASK -->|"TRAP 3 sleep / TRAP 4 yield / TRAP 1 exit"| SCHED
+    TASK -->|"TRAP 0 create / TRAP 2 kill"| TASK
+    SCHED -->|"all slots visited"| WAIT["Wait for frame flag"]
+    VBL["VBlank interrupt 0x542<br/>hardware updates, inputs,<br/>sleep timers"] -.->|"sets frame flag"| WAIT
+    WAIT --> SCHED
+```
+
 **The VBlank handler (`0x542`).** Once per frame it:
 
 1. Flips the sprite list between two buffers (`0x900000` and `0x904000`). The game double-buffers its sprite list.
@@ -132,6 +246,29 @@ None of this touches CPS-1 hardware. It uses only standard 68000 features, all o
 7. Decrements sleeping tasks' timers and sets the frame flag.
 
 This handler is the single place where most hardware registers are written, which makes it the natural seam for a replacement.
+
+One arcade frame, in order:
+
+```mermaid
+sequenceDiagram
+    participant T as Game tasks
+    participant R as Work RAM shadows
+    participant G as GFX RAM
+    participant V as VBlank handler
+    participant H as CPS-A / CPS-B
+    participant S as QSound shared RAM
+    Note over T,G: Active display
+    T->>R: scroll positions, sound queue
+    T->>G: sprite list (back buffer), tilemap entries, palettes
+    T->>T: yield or sleep via TRAP
+    Note over V,S: VBlank (level 2 interrupt)
+    V->>H: flip sprite buffer, table bases
+    V->>H: palette base (hardware copies palette)
+    V->>S: next queued sound command
+    V->>H: scroll registers from shadows
+    V->>R: read inputs, store current and previous
+    V->>R: tick sleep timers, set frame flag
+```
 
 **Function calls.** The code is hand-written assembly: about 6,300 `JSR` to absolute addresses, about 8,700 `BSR`-style branches and about 4,000 `RTS` (byte-pattern counts from the ROM, so approximate). Arguments are passed in registers, not on the stack. Registers have fixed roles: `A5` global base, `A6` the current object. Jump tables indexed by state bytes are common (per the hack-scene disassembly notes). This differs from C code built with SGDK's GCC, which pushes arguments on the stack and treats `d0/d1/a0/a1` as scratch. Any new C code called from arcade code needs glue that saves registers and keeps `A5`/`A6` intact; writing the new hardware layer in assembly avoids the mismatch.
 
@@ -151,6 +288,33 @@ The CPS-1 video system has no pattern memory. The game writes *lists* into GFX R
 
 - Pixel clock 8 MHz, 512×262 total, 384×224 visible, 59.637 Hz (MAME).
 - GFX RAM is ordinary memory for the 68000: 192 KB at `0x900000`. The game chooses where each table lives by writing base registers.
+
+```mermaid
+flowchart LR
+    subgraph LISTS["GFX RAM (written by the game)"]
+        OBJ["Sprite list<br/>256 entries"]
+        S1["Scroll 1 map<br/>8x8 tiles"]
+        S2["Scroll 2 map<br/>16x16 tiles"]
+        S3["Scroll 3 map<br/>32x32 tiles"]
+        PAL["Palettes"]
+    end
+    GROM["Graphics ROM 4 MB<br/>32,000 tiles of 16x16"]
+    FB["Sprite frame buffer<br/>one frame late"]
+    LB["Tile line fetch"]
+    MIX["CPS-B mixer<br/>layer order +<br/>per-pen priority masks"]
+    PRAM["Palette RAM<br/>3,072 entries"]
+    OUT["Screen"]
+    OBJ --> FB
+    S1 --> LB
+    S2 --> LB
+    S3 --> LB
+    GROM -->|"pixels by tile code"| FB
+    GROM -->|"pixels by tile code"| LB
+    FB --> MIX
+    LB --> MIX
+    PAL -->|"copied on register write"| PRAM
+    MIX --> PRAM --> OUT
+```
 
 `dino`'s layout (**ROM**, matches MAME traces):
 
@@ -207,6 +371,27 @@ The VDP draws from its own 64 KB of VRAM, which holds *both* the tile pixels and
 - H40 mode: 320×224, 262 lines, 59.92 Hz NTSC. There is no 384-wide mode.
 - Pattern: 8×8 pixels, 4 bpp, 32 bytes.
 
+```mermaid
+flowchart LR
+    SRC["ROM / work RAM<br/>patterns and tables"]
+    subgraph VR["VRAM 64 KB"]
+        PATT["Patterns<br/>about 1,610 of 8x8"]
+        NT["Plane A, B, window<br/>name tables"]
+        SAT["Sprite table<br/>80 entries"]
+        HS["Hscroll table"]
+    end
+    LINE["Line renderer<br/>20 sprites and<br/>320 sprite px per line"]
+    PRI["Priority<br/>1 bit per tile or sprite"]
+    CRAM["CRAM<br/>64 entries"]
+    OUT["Screen"]
+    SRC -->|"DMA: about 7.3 KB per VBlank<br/>18 bytes per active line"| VR
+    PATT --> LINE
+    NT --> LINE
+    SAT --> LINE
+    HS --> LINE
+    LINE --> PRI --> CRAM --> OUT
+```
+
 ### 4.2 VRAM budget
 
 | Item | Bytes |
@@ -217,6 +402,15 @@ The VDP draws from its own 64 KB of VRAM, which holds *both* the tile pixels and
 | Sprite attribute table | 640 |
 | Horizontal scroll table (per-line) | 960 |
 | **Left for patterns** | **about 51.6 KB ≈ 1,610 patterns** |
+
+```mermaid
+pie showData
+    title VRAM use in KB (H40, two 64x32 planes, window, per-line scroll)
+    "Patterns (about 1,610)" : 51.6
+    "Plane A + B name tables" : 8.2
+    "Window name table" : 4.1
+    "Sprite + hscroll tables" : 1.6
+```
 
 1,610 patterns is about 400 tiles of 16×16, shared between both planes and all sprites. For scale: one screen of CPS-1 scroll 3 (32×32 tiles, about 12×7 visible) is up to 1,344 patterns if every tile is distinct, which alone would nearly fill VRAM.
 
@@ -277,6 +471,25 @@ A new enemy type walking on screen, or a fast scroll into fresh background, can 
 | Row scroll on scroll 2 | Per-line hscroll on both planes | Direct equivalent |
 | One-frame sprite latency, double-buffered list | VBlank upload | The existing double buffer gives a stable list to translate |
 
+Layer order, back to front, and the likely mapping:
+
+```mermaid
+flowchart LR
+    subgraph CPS["CPS-1 dino, back to front"]
+        direction TB
+        C3["Scroll 3<br/>32x32 background"] --> C2["Scroll 2<br/>16x16 floor<br/>parts can cover sprites"] --> CS["Sprites<br/>256 entries"] --> C1["Scroll 1<br/>8x8 HUD and text"]
+    end
+    subgraph MD["Mega Drive, back to front"]
+        direction TB
+        MB["Plane B low"] --> MA["Plane A low"] --> MS["Sprites low"] --> MBH["Plane B high"] --> MAH["Plane A high"] --> MSH["Sprites high / window"]
+    end
+    C3 -.-> MB
+    C2 -.->|"normal tiles"| MA
+    C2 -.->|"tiles that cover sprites"| MAH
+    CS -.-> MS
+    C1 -.-> MSH
+```
+
 The colour reduction is the part with the most visible cost and the least mechanical solution. Arcade tiles are stored as 4-bit indexes into whichever palette the game assigns at run time, so the same tile can appear in different palettes. Converting to 4 shared palettes means deciding, per scene, which arcade palettes merge, and storing tile pixels already remapped.
 
 ## 6. Sound
@@ -301,6 +514,15 @@ Consequences:
 
 **ROM size.** Arcade content is 1.5 MB program + 4 MB graphics + 2 MB samples. The graphics are already 4 bpp, the same depth as the Mega Drive, so converted tiles are about the same size before compression. The total exceeds the 4 MB flat cartridge space. The Sega mapper (as in *Super Street Fighter II*) divides the 4 MB window into eight 512 KB regions; region 0 is fixed and regions 1–7 are switched by writing to `0xA130F3–0xA130FF`. Flash carts and BlastEm enable it from the header string `SEGA SSF`. A realistic ceiling for today's flash carts is 8–15 MB. For comparison, the Final Fight MD prototype in this folder is a flat 4 MB ROM (**ROM**), built as a rewrite with reduced assets.
 
+```mermaid
+pie showData
+    title Arcade ROM content in MB (flat Mega Drive cartridge space is 4 MB)
+    "Graphics" : 4
+    "QSound samples" : 2
+    "68000 program" : 1.5
+    "Z80 program and sequences" : 0.125
+```
+
 The 1.5 MB program needs to stay mapped at its original addresses in the fixed/low regions; graphics and samples go in switched banks.
 
 **Input.** The arcade has three players with a stick and two buttons each, read active-low from `0x800000`, `0x800018` and `0xF1C000`. The Mega Drive pad protocol is different (TH line toggling, two reads per pad) but the game only reads inputs in one routine in the VBlank handler, which can build the same bytes from pads. A third player needs Team Player or EA 4-Way Play. Coin and service inputs need a mapping (for example Start as coin).
@@ -321,6 +543,39 @@ Two strategies exist; prior art has both.
 - PC static recompilations of `dino` (2026) show the `dino` program runs correctly against a replaced hardware layer.
 
 We found no CPS-1 game ported to the Mega Drive this way.
+
+The shape of strategy B:
+
+```mermaid
+flowchart TB
+    subgraph OFF["Offline (build time)"]
+        AROM["Arcade ROM set<br/>supplied by the user"]
+        CONV["Converters<br/>tiles to 8x8 patterns,<br/>palette plans per scene,<br/>sprite cutting, samples"]
+        PATCH["Patch list<br/>hardware accesses in the<br/>68000 program"]
+        AROM --> CONV
+        AROM --> PATCH
+    end
+    subgraph CART["Mega Drive cartridge (mapper)"]
+        GAME["Arcade 68000 program<br/>kernel, logic, AI, collision<br/>at original addresses"]
+        HAL["New hardware layer<br/>boot, VBlank, input, sound commands"]
+        XLATE["Video translation<br/>arcade sprite list and tilemaps<br/>to planes and sprites"]
+        CACHE["Pattern cache +<br/>DMA queue"]
+        BANKS["Banked data<br/>converted patterns,<br/>palettes, samples, music"]
+        SND["Z80 driver<br/>FM music + PCM effects"]
+    end
+    VDP["VDP"]
+    YM["YM2612 + PSG"]
+    PATCH --> GAME
+    CONV --> BANKS
+    GAME -->|"video tables"| XLATE
+    GAME -->|"sound command numbers"| HAL
+    HAL -->|"pad state as arcade input bytes"| GAME
+    XLATE --> CACHE
+    BANKS --> CACHE
+    CACHE -->|"DMA in VBlank"| VDP
+    HAL --> SND --> YM
+    BANKS --> SND
+```
 
 Why B looks feasible for `dino` specifically:
 
