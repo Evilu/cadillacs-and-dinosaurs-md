@@ -7,8 +7,8 @@ ROM=$(cd "$(dirname "$1")" && pwd)/$(basename "$1"); OUT=$2; FRAMES=${3:-600}; E
 HERE=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 cd "$OUT"
-TRACE_OUT="$OUT" TRACE_FRAMES=$FRAMES TRACE_SNAP_EVERY=$EVERY TRACE_INPUT=none \
-  mame genesis -cart "$ROM" -video none -sound none -skip_gameinfo -nothrottle \
+TRACE_OUT="$OUT" TRACE_FRAMES=$FRAMES TRACE_SNAP_EVERY=$EVERY TRACE_INPUT=${TRACE_INPUT:-none} \
+  "$HERE/run_md.sh" "$ROM" "$OUT" -video none -sound none \
   -seconds_to_run $((FRAMES / 50 + 10)) -snapshot_directory "$OUT" \
   -autoboot_script "$HERE/mame/md_trace.lua" > "$OUT/mame.log" 2>&1 || true
 grep -h "trace error\|Fatal" "$OUT/mame.log" || true
@@ -25,4 +25,4 @@ print(f"frames {len(rows)}  last PC {pcs[-1]:06x}  width {last['width']}  sprite
 print('VRAM DMA bytes/frame max', max(int(r['dma_vram']) for r in rows), ' lines over sprite limit max', max(int(r['spr_over_lines']) for r in rows))
 print('RESULT:', 'CPU appears stuck in an exception handler' if (stuck and in_exc) else 'CPU stuck at one address' if stuck else 'running')
 PY
-ls "$OUT"/genesis/*.png 2>/dev/null | wc -l | xargs echo snapshots:
+ls "$OUT"/cadmd/*.png "$OUT"/genesis/*.png 2>/dev/null | wc -l | xargs echo snapshots:

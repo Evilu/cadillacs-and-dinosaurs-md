@@ -44,7 +44,9 @@ The hardware layer (`src/hal.s`) boots the console, and on every VBlank fills th
 | Sound interface `0xF18000–0xF1803F` | Shadow at `0xFF1200` |
 | Player 3, EEPROM `0xF1C000–0xF1C01F` | Shadow at `0xFF1280` |
 | Sprite lists `0x900000`, `0x904000` | RAM buffers at `0xFF2000`, `0xFF2800` |
-| Rest of GFX RAM `0x908000–0x92FFFF` | Not handled yet (milestone 3) |
+| Palettes and row scroll `0x914000–0x917FFF` | RAM at `0xFF3000–0xFF6FFF` |
+| Tilemaps `0x908000–0x913FFF` and the rest of GFX RAM | Not handled yet (milestone 3) |
+| Hardware layer's own data | `0xFF12C0`, `0xFF7000–0xFF77FF` |
 
 Measured over stage 1, the game writes 41% of its work RAM after boot and leaves one block of about 28 KB untouched (`0xFF0FD3–0xFF7FFF`). The shadows live there. The game's start-up does clear that block once, so anything the hardware layer keeps there is re-established every frame. Whether later stages use the block is not yet measured.
 
@@ -65,10 +67,39 @@ Not done in this milestone: any picture or sound, GFX RAM (writes go nowhere, re
 ### 2. Sprites
 
 - **Done (emulator):** the sprite list builder (`0x13FA6`) and the list-clearing routine write to two RAM buffers at `0xFF2000` and `0xFF2800` in place of arcade video RAM (four address operands).
-- **Done (emulator):** outlines. Every VBlank the hardware layer reads the finished list and draws each entry as boxes, one Mega Drive sprite per 32×32 piece of the tile block, coloured by the low two bits of the arcade palette number. The title logo, the four characters on the select screen and the characters in stage 1 appear as moving silhouettes. The view is the middle 320 pixels of the arcade's 384. Only the first 79 pieces are drawn and nothing is done about the per-line limit yet.
-- Then real graphics: convert tiles from the user's ROM at build time, cut blocks into pieces of up to 32×32, load patterns through a VRAM cache and a DMA queue.
+- **Done (emulator):** outlines, as a first check of positions, sizes and order.
+- **Done (emulator): real sprite graphics.** The title logo, the attract-mode story (portraits, the Cadillac, the raptor), the character select, and stage 1 through to the mansion interior show Capcom's sprite art with correct colours.
+
+How it works:
+
+- **Build time.** Every arcade 16×16 tile in the sprite range is converted to four Mega Drive patterns (pen 15, transparent on the CPS-1, becomes pen 0). A byte per tile records whether it has any pixels. Colour levels are precomputed into a 256-byte table from MAME's brightness formula.
+- **Graphics ROM layout.** The arcade graphics ROM is organised by use: tile codes `0x0000–0x07FF` text layer, `0x0800–0x57FF` sprites, `0x5800–0x6FFF` playfield tiles (some also used as sprites), `0x7000–0x7FFF` far background (stage 1 trace). Only `0x0800–0x6FFF` is stored for now: 3.25 MB, giving a 4.8 MB ROM.
+- **Per frame**, after Capcom's VBlank handler shows a finished list, the hardware layer walks it once:
+  - cuts each block into pieces of two tiles side by side (32×16) where the two tiles are consecutive in ROM, otherwise single tiles (16×16), honouring the block's flips;
+  - looks each piece up in a 128-slot, 4-way VRAM cache (1,024 patterns) and queues a DMA from ROM for misses, at most 22 per frame;
+  - writes the Mega Drive sprite table in the arcade's order, so the arcade's front-most sprites stay in front;
+  - picks the four sprite palettes used by the most tiles, converts them to Mega Drive colours, and sends sprites in other palettes through the first line.
+- **Next VBlank** it sends the queued tiles, the sprite table and the palettes.
+- **The work only happens when the game has finished a new list.** Processing an unterminated list of 256 entries took more than a frame.
+
+Measured in MAME over 100 seconds of attract mode and stage 1 (6,000 frames with sprites):
+
+| Per frame | mean | p50 | p95 | max |
+|---|---|---|---|---|
+| Hardware sprites | 48 | 46 | 69 | 80 (cap reached in 2.3% of frames) |
+| VRAM DMA, bytes | 565 | 448 | 1,696 | 5,760 |
+| Colours in CRAM | 44 | 47 | 50 | 51 |
+
+Known problems:
+
+- **Per-line limits.** 30% of frames have a line with more than 320 sprite pixels or 20 sprites, where the VDP drops the pieces latest in the list. The title logo loses letters this way.
+- **Palettes.** Sprites outside the four busiest palettes use the wrong colours.
+- **VBlank can arrive late.** The arcade kernel raises the interrupt mask to level 6 to shut out its own level-2 VBlank; on the Mega Drive that also delays our level-6 VBlank, and in 2.5% of frames the uploads start after the picture has begun.
+
+Still to do in this milestone:
+
 - Replace the builder with one that writes the Mega Drive sprite table directly (a quarter of the game's CPU work).
-- Overflow rules for more than 80 sprites and more than 320 pixels on a line.
+- Overflow rules: rotation (flicker) when a line or the 80-sprite total overflows; 32×32 pieces to halve the sprite count.
 
 ### 3. Backgrounds and palettes
 
@@ -105,10 +136,14 @@ Not done in this milestone: any picture or sound, GFX RAM (writes go nowhere, re
 Built ROMs go to `test/roms/md/`, which git ignores because they contain the user's game program. Build with:
 
 ```sh
-analysis/venv/bin/python3 -I tools/build/build.py analysis/work/dino_prg.bin \
+analysis/venv/bin/python3 -I tools/build/build.py analysis/work/dino_prg.bin analysis/work/dino_gfx.bin \
   analysis/mame/dino_access/access_pcs.csv test/roms/md/cadillacs_md.md
+tools/run_md.sh test/roms/md/cadillacs_md.md analysis/mame/run      # MAME with the mapper, in a window
+TRACE_INPUT=arcade tools/check_md.sh test/roms/md/cadillacs_md.md analysis/mame/check 7200 600
 ```
 
 Pad: A = coin, Start = start, B = attack, C = jump.
 
-The current build shows sprite outlines on a blue background and has no backgrounds, real graphics or sound. It has been run in MAME's Mega Drive driver only. Do not run it on a real console or flash cart yet: it still writes to arcade video RAM addresses, which a real Mega Drive does not tolerate.
+The ROM uses the Sega (SSF2) mapper and says so in its header (`SEGA SSF`). MAME enables the mapper only through a software-list entry, which `tools/run_md.sh` writes, and only implements banks 0–9, so the ROM must stay under 5 MB for MAME. Other emulators and flash carts read the header.
+
+The current build shows the sprites with their real graphics on a black screen. It has no backgrounds, HUD or sound. It has been run in MAME's Mega Drive driver only. Do not run it on a real console or flash cart yet: it still writes to arcade tilemap addresses, which a real Mega Drive does not tolerate.

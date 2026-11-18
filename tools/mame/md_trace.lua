@@ -2,7 +2,8 @@
 -- Decodes every 68000 write to the VDP ports and logs per-frame transfer, palette
 -- and sprite statistics to md_frames.csv. Optional pad script drives the game.
 -- env: TRACE_OUT (directory), TRACE_FRAMES (frames to run), TRACE_SNAP_EVERY (frames),
---      TRACE_INPUT=none to leave the pads alone
+--      TRACE_INPUT=none to leave the pads alone, TRACE_INPUT=arcade for the port
+--      (A = coin at frame 700, Start at 800, then walk and fight)
 
 local out_dir = os.getenv("TRACE_OUT") or "."
 local max_frames = tonumber(os.getenv("TRACE_FRAMES") or "18000")
@@ -249,17 +250,32 @@ local function on_frame()
     if vis == 0 then quiet = quiet + 1 else quiet = 0 end
     if quiet > 600 then in_game = false end
   end
-  local menu = not in_game and t > 240 and scripted
-  press("P1 Start", menu and t % 150 < 6)
-  press("P1 A", menu and t % 150 >= 70 and t % 150 < 74)
-  local cyc = t % 300
-  local walk, fight, back = cyc < 150, cyc >= 150 and cyc < 270, cyc >= 270
-  press("P1 Right", in_game and walk)
-  press("P1 Left", in_game and back)
-  press("P1 Up", in_game and fight and t % 80 < 10)
-  press("P1 Down", in_game and fight and t % 80 >= 40 and t % 80 < 50)
-  press("P1 B", in_game and fight and t % 12 < 3)
-  press("P1 C", in_game and walk and t % 140 == 70)
+  if os.getenv("TRACE_INPUT") == "arcade" then
+    in_game = t > 900
+    press("P1 A", t >= 700 and t < 708)
+    press("P1 Start", t >= 800 and t < 808)
+    local cyc = t % 300
+    press("P1 Right", in_game and cyc < 150)
+    press("P1 Left", in_game and cyc >= 270)
+    press("P1 Up", in_game and cyc >= 150 and cyc < 270 and t % 80 < 10)
+    press("P1 Down", in_game and cyc >= 150 and cyc < 270 and t % 80 >= 40 and t % 80 < 50)
+    press("P1 B", in_game and cyc >= 150 and cyc < 270 and t % 12 < 3)
+    press("P1 C", in_game and cyc < 150 and t % 140 == 70)
+    scripted = false
+  end
+  if os.getenv("TRACE_INPUT") ~= "arcade" then
+    local menu = not in_game and t > 240 and scripted
+    press("P1 Start", menu and t % 150 < 6)
+    press("P1 A", menu and t % 150 >= 70 and t % 150 < 74)
+    local cyc = t % 300
+    local walk, fight, back = cyc < 150, cyc >= 150 and cyc < 270, cyc >= 270
+    press("P1 Right", in_game and walk)
+    press("P1 Left", in_game and back)
+    press("P1 Up", in_game and fight and t % 80 < 10)
+    press("P1 Down", in_game and fight and t % 80 >= 40 and t % 80 < 50)
+    press("P1 B", in_game and fight and t % 12 < 3)
+    press("P1 C", in_game and walk and t % 140 == 70)
+  end
   game_frames = game_frames + (in_game and 1 or 0)
 
   if snap_every > 0 and t % snap_every == 0 then
