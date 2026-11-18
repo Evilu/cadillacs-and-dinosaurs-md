@@ -100,9 +100,9 @@ far_covered:
     cmpi.w  #-16, d0
     bge.s   3f
     moveq   #-16, d0
-3:  cmpi.w  #335, d2
+3:  cmpi.w  #320, d2
     ble.s   4f
-    move.w  #335, d2
+    move.w  #320, d2
 4:  cmp.w   d2, d0
     bgt.s   8f
     move.w  d1, d3
@@ -209,6 +209,9 @@ s3_acquire:
     bne.s   s3_upload
     rts
 1:  move.w  s3_free_top, d1
+    bne.s   2f
+    bsr.w   s2_return
+    move.w  s3_free_top, d1
     bne.s   2f
     moveq   #-1, d5
     rts
@@ -693,7 +696,8 @@ s3_write:
     lea     PM_INDEX + 32, a1
     cmpi.b  #0xff, 0(a1,d4.w)
     bne.s   7f
-    move.w  #1, q_request
+    addi.w  #33, d4
+    move.w  d4, q_request
 7:  tst.w   s3_valid
     beq.s   9f
     move.w  d2, d4

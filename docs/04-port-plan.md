@@ -159,6 +159,14 @@ Sprite lists finished per second, same script: opening 20–31 → 44–64; firs
 
 **Select-screen load.** While it loaded, 24–51 of every 60 VBlanks were handled. Two changes: after a reduction, only the tiles in VRAM whose palette's pen map changed are loaded again, in place, and no cell is redrawn; and when the game fills a map with a blank tile, the plane is wiped with one VRAM fill and every slot released. In the same five seconds 57, 60, 42, 41 and 60 VBlanks are now handled; what remains is tile loading and the reduction itself.
 
+**Doorway and door scene of stage 1** (scripted play with the player's health, the word at `0xFFB2E0`, held at 100 so the run reaches them; the arcade run with the same script is the reference):
+
+- **The playfield needs up to 137 slots there and had 128** (distinct tile and palette pairs in the window, sampled every 100 frames); cells without a slot showed the layer behind. The window is now 22 columns, and when the playfield runs out it borrows free far background slots, four playfield tiles each, up to eight; the far background takes back a group once none of its four is in use. Indoors the far background uses no slots at all.
+- **Most palette changes no longer choose the line again.** A new palette whose 15 colours are each within a squared distance of 24 (in doubled Mega Drive steps) of a line colour gets a pen map and nothing else is touched. Before, the door's palette alone made the line be chosen again and nearly every tile reloaded: `remap_copy` took 12–18% of the CPU in those stretches.
+- **Sprite lines:** a palette takes over a line when it covers a quarter more area than the line's (was twice). The enemy who walks out of the door fades in from dark; it is the fourth sprite palette on screen, so it borrows a line, and the borrowed line is now chosen again every 16 conversions instead of once while the palette was still dark.
+- **The conversion gap** now moves between two and four frames.
+- Sprite lists per second through the doorway: 36–51 before, 54–62 after. In the brawl that follows (six enemies) the game's own code takes 44% of the CPU and the sprite converter 25%; it runs at 42–58.
+
 Still to do:
 
 - The text layer (scroll 1) in the window: the HUD, and all the text and player panels of the title and select screens. Its writes are currently dropped. VRAM and the hardware layer's RAM are both full, so it needs room made first.

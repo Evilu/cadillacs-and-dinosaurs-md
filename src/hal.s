@@ -246,9 +246,9 @@ dma_to_vram:
 | ---------------------------------------------------------------- sprites
 
 | Runs when the game has shown a new list, at most every second frame: the 68000
-| cannot convert the list 60 times a second alongside the game. When the game
-| shows fewer than 24 lists in 32 frames the gap grows to three frames, and goes
-| back to two once it shows 30. Palette lines are
+| cannot convert the list 60 times a second alongside the game. Every 32 frames
+| the gap grows by a frame (to four at most) if the game showed fewer than 20
+| lists, and shrinks by one (to two at least) if it showed 28 or more. Palette lines are
 | reassigned every 8 frames.
 build_sprites:
     addq.w  #1, conv_wait
@@ -261,15 +261,18 @@ build_sprites:
 0:  move.l  hal_frames, d1
     andi.w  #31, d1
     bne.s   2f
-    moveq   #2, d1
-    cmpi.w  #24, flips
-    bhs.s   5f
-    moveq   #3, d1
-5:  cmpi.w  #30, flips
-    bhs.s   6f
-    cmp.w   conv_gap, d1
-    bhs.s   6f
     move.w  conv_gap, d1
+    cmpi.w  #20, flips
+    bhs.s   5f
+    cmpi.w  #4, d1
+    bhs.s   6f
+    addq.w  #1, d1
+    bra.s   6f
+5:  cmpi.w  #28, flips
+    blo.s   6f
+    cmpi.w  #2, d1
+    bls.s   6f
+    subq.w  #1, d1
 6:  move.w  d1, conv_gap
     clr.w   flips
 2:  tst.w   list_dirty
@@ -600,9 +603,10 @@ count_palettes:
 3:  rts
 
 | Sprites get lines 0 to 2; line 3 belongs to the backgrounds (bgpal.s). A line keeps
-| its palette while that palette is on screen, unless another covers more than twice
-| its area; the players' palettes (0 to 2) always win. Palettes without a line use the
-| line whose colours are closest.
+| its palette while that palette is on screen, unless another covers a quarter more
+| area; the players' palettes (0 to 2) always win. Palettes without a line use the
+| line whose colours are closest, chosen again every 16 conversions because the
+| game fades palettes in.
 assign_lines:
     movem.l d0-d7/a0-a5, -(sp)
     lea     PAL_COUNT, a1
@@ -612,7 +616,11 @@ assign_lines:
     ori.w   #0x4000, (a1)
 1:  addq.l  #2, a1
     dbra    d0, 0b
-    lea     PAL_COUNT, a1
+    move.w  conv_count, d0
+    andi.w  #0x1f, d0
+    bne.s   1f
+    clr.l   pal_known
+1:  lea     PAL_COUNT, a1
     lea     line_pal, a3
     move.l  (a3), -(sp)
     moveq   #2, d3
@@ -666,7 +674,9 @@ assign_lines:
 17: addq.w  #1, d6
     cmpi.w  #3, d6
     blt.s   7b
-    add.w   d4, d4
+    move.w  d4, d0
+    lsr.w   #2, d0
+    add.w   d0, d4
     bcs.s   9f
     cmp.w   d4, d1
     bls.s   9f

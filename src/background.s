@@ -13,20 +13,22 @@
     .equ S2_END,        0x910000
     .equ S2_STORE,      0xff4000    | (col << 5 | row & 31) * 4: code word, attribute word
     .equ PLANE_B,       0xc000
-    .equ S2_SLOTS,      128         | patterns 0x220-0x41f
-    .equ S2_W,          23          | columns drawn: the 21 visible ones plus one each side
+    .equ S2_OWN,        128         | slots in patterns 0x220-0x41f
+    .equ S2_SLOTS,      160         | with 8 groups of 4 that sit in far background slots while those are free
+    .equ S2_W,          22          | columns drawn: one hidden on the left, then the 21 the screen can show
     .equ S2_PATTERN,    0x220       | first VRAM pattern of the playfield tile cache
     .equ HASH,          0xff7000    | 256 entries: tile code (0xffff empty), slot
     .equ HASH_END,      HASH + 1024
     .equ S2_REF,        0xff7400    | per slot: cells using it (bits 0-9), reload wanted (bit 10), palette (bits 11-15)
-    .equ S2_KEY,        0xff7500    | per slot: tile code
-    .equ FREE_STACK,    0xff7600    | free slot numbers
+    .equ S2_KEY,        0xff7540    | per slot: tile code, or the next free slot while it is free (0xffff ends the list)
     .equ RING_SLOT,     0xff7680    | per ring cell (32 x 16): slot, 0xff for none
     .equ DIRTY,         0xff7880    | 64 words: col << 8 | row
     .equ BG_VARS,       0xff7900
     .equ S2_HALF,       0xff7f00    | 2048 bits, one per store cell: which half of the 64 arcade rows it holds
     .equ COVER,         0xff7960    | 32 longs, one per ring column: bit r set if store row r shows a fully opaque tile
-    .equ free_top,      BG_VARS
+    .equ free_head,     BG_VARS         | first free slot, 0xffff none
+    .equ BORROW,        BG_VARS + 44    | 8 bytes: far background slot behind each borrowed group, 0xff none
+    .equ GROUP_USE,     BG_VARS + 52    | 8 bytes: slots of the group holding a tile
     .equ dirty_count,   BG_VARS + 2
     .equ s2_valid,      BG_VARS + 4
     .equ s2_col0,       BG_VARS + 6
@@ -58,13 +60,16 @@ bg_init:
     move.w  #S2_SLOTS - 1, d0
 2:  clr.w   (a0)+
     dbra    d0, 2b
-    lea     FREE_STACK, a0
-    moveq   #0, d0
-3:  move.b  d0, (a0)+
+    lea     S2_KEY, a0
+    moveq   #1, d0
+3:  move.w  d0, (a0)+
     addq.w  #1, d0
-    cmpi.w  #S2_SLOTS, d0
+    cmpi.w  #S2_OWN, d0
     blt.s   3b
-    move.w  #S2_SLOTS, free_top
+    move.w  #0xffff, (a0)
+    clr.w   free_head
+    move.l  #0xffffffff, BORROW
+    move.l  #0xffffffff, BORROW + 4
     lea     RING_SLOT, a0
     move.w  #511, d0
 4:  move.b  #0xff, (a0)+
@@ -157,16 +162,25 @@ s2_acquire:
     bclr    #2, 0(a3,d1.w)
     bne.s   upload_tile
     rts
-1:  move.w  free_top, d1
-    bne.s   2f
+1:  move.w  free_head, d5
+    bpl.s   2f
+    bsr.w   s2_borrow
+    move.w  free_head, d5
+    bpl.s   2f
     moveq   #-1, d5
     rts
-2:  subq.w  #1, d1
-    move.w  d1, free_top
-    lea     FREE_STACK, a3
-    moveq   #0, d5
-    move.b  0(a3,d1.w), d5
-    move.w  d0, (a2)
+2:  move.w  d5, d1
+    add.w   d1, d1
+    lea     S2_KEY, a3
+    move.w  0(a3,d1.w), free_head
+    cmpi.w  #S2_OWN, d5
+    blo.s   3f
+    move.w  d5, d1
+    subi.w  #S2_OWN, d1
+    lsr.w   #2, d1
+    lea     GROUP_USE, a3
+    addq.b  #1, 0(a3,d1.w)
+3:  move.w  d0, (a2)
     move.b  h_pal, 2(a2)
     move.b  d5, 3(a2)
     moveq   #0, d1
@@ -183,9 +197,7 @@ s2_acquire:
 
 | d0 tile code, d5 slot: copies the tile's four patterns from ROM into the slot
 upload_tile:
-    move.w  d5, d1
-    lsl.w   #2, d1
-    addi.w  #S2_PATTERN, d1
+    bsr.w   slot_pat
     lsl.w   #5, d1
     move.w  d1, d2
     andi.w  #0x3fff, d2
@@ -230,12 +242,118 @@ s2_release:
     tst.w   d1
     bmi.s   8f
     bsr.w   hash_delete
-8:  move.w  free_top, d1
-    lea     FREE_STACK, a3
-    move.b  d5, 0(a3,d1.w)
-    addq.w  #1, d1
-    move.w  d1, free_top
+8:  move.w  d5, d1
+    add.w   d1, d1
+    lea     S2_KEY, a3
+    move.w  free_head, 0(a3,d1.w)
+    move.w  d5, free_head
+    cmpi.w  #S2_OWN, d5
+    blo.s   9f
+    move.w  d5, d1
+    subi.w  #S2_OWN, d1
+    lsr.w   #2, d1
+    lea     GROUP_USE, a3
+    subq.b  #1, 0(a3,d1.w)
 9:  rts
+
+| The playfield is out of slots: turns a free far background slot into four.
+s2_borrow:
+    movem.l d0-d2/a0-a1, -(sp)
+    move.w  s3_free_top, d1
+    beq.s   9f
+    lea     BORROW, a0
+    moveq   #0, d2
+1:  cmpi.b  #0xff, 0(a0,d2.w)
+    beq.s   2f
+    addq.w  #1, d2
+    cmpi.w  #8, d2
+    blt.s   1b
+    bra.s   9f
+2:  subq.w  #1, d1
+    move.w  d1, s3_free_top
+    lea     S3_FREE, a1
+    move.b  0(a1,d1.w), 0(a0,d2.w)
+    clr.b   8(a0,d2.w)
+    lsl.w   #2, d2
+    addi.w  #S2_OWN, d2
+    lea     S2_KEY, a1
+    moveq   #3, d0
+3:  move.w  d2, d1
+    add.w   d1, d1
+    move.w  free_head, 0(a1,d1.w)
+    move.w  d2, free_head
+    addq.w  #1, d2
+    dbra    d0, 3b
+9:  movem.l (sp)+, d0-d2/a0-a1
+    rts
+
+| The far background is out of slots: takes back a borrowed group none of whose
+| slots holds a tile. -> s3_free_top raised if one was found
+s2_return:
+    movem.l d0-d4/a0-a1, -(sp)
+    lea     BORROW, a0
+    moveq   #0, d2
+1:  cmpi.b  #0xff, 0(a0,d2.w)
+    beq.s   2f
+    tst.b   8(a0,d2.w)
+    beq.s   3f
+2:  addq.w  #1, d2
+    cmpi.w  #8, d2
+    blt.s   1b
+    bra.s   9f
+3:  lea     S2_KEY, a1
+    move.w  free_head, d3
+    moveq   #-1, d4
+4:  tst.w   d3
+    bmi.s   7f
+    move.w  d3, d1
+    add.w   d1, d1
+    move.w  0(a1,d1.w), d0
+    cmpi.w  #S2_OWN, d3
+    blo.s   5f
+    move.w  d3, -(sp)
+    subi.w  #S2_OWN, d3
+    lsr.w   #2, d3
+    cmp.w   d2, d3
+    movem.w (sp)+, d3
+    beq.s   6f
+5:  move.w  d4, 0(a1,d1.w)
+    move.w  d3, d4
+6:  move.w  d0, d3
+    bra.s   4b
+7:  move.w  d4, free_head
+    move.w  s3_free_top, d1
+    lea     S3_FREE, a1
+    move.b  0(a0,d2.w), 0(a1,d1.w)
+    addq.w  #1, d1
+    move.w  d1, s3_free_top
+    move.b  #0xff, 0(a0,d2.w)
+9:  movem.l (sp)+, d0-d4/a0-a1
+    rts
+
+| d5 slot -> d1 its first VRAM pattern
+slot_pat:
+    move.w  d5, d1
+    cmpi.w  #S2_OWN, d1
+    bhs.s   1f
+    lsl.w   #2, d1
+    addi.w  #S2_PATTERN, d1
+    rts
+1:  subi.w  #S2_OWN, d1
+    lsr.w   #2, d1
+    lea     BORROW, a3
+    move.b  0(a3,d1.w), d1
+    andi.w  #0xff, d1
+    add.w   d1, d1
+    lea     s3_slot_pat, a3
+    move.w  0(a3,d1.w), d1
+    move.l  d2, -(sp)
+    move.w  d5, d2
+    andi.w  #3, d2
+    lsl.w   #2, d2
+    add.w   d2, d1
+    move.l  (sp)+, d2
+    rts
 
 | ---------------------------------------------------------------- plane B
 
@@ -339,8 +457,8 @@ render_cell:
     bset    d1, d2
     move.l  d2, (a1)
 12:
-    lsl.w   #2, d5
-    addi.w  #S2_PATTERN, d5
+    bsr.w   slot_pat
+    move.w  d1, d5
     move.w  r_attr, d0
     move.w  d0, d1
     andi.w  #0x60, d1
@@ -743,7 +861,8 @@ s2_write:
     lea     PM_INDEX, a1
     cmpi.b  #0xff, 0(a1,d5.w)
     bne.s   7f
-    move.w  #1, q_request
+    addq.w  #1, d5
+    move.w  d5, q_request
 7:
     tst.w   s2_valid
     beq.s   9f

@@ -73,6 +73,7 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 - **Game RAM is not free.** `0xFF9A00–0xFFAFFF` stays zero in stage 1 dumps but attract mode writes it; the hardware layer's block `0xFF1000–0xFF7FFF` saw only the start-up clear in 5 minutes of attract mode and stage 1 (write tap on the arcade).
 - **Palettes:** sprites use CRAM lines 0–2 (arcade palettes as they are), both backgrounds share line 3 through `bgpal.s`, which reduces their colours to 15 and renumbers tile pixels on upload. Background tile cache keys are tile code plus palette.
 - **Never release tile slots and redraw over several frames with the display on:** cells not yet redrawn show whatever reused their slot.
+- **Scripted play is not repeatable across builds:** timing changes what the enemies do. Hold the player's health (`0xFFB2E0`, word) at 100 from Lua to reach later scenes, on the arcade as well.
 - **VRAM is full.** Sprites 512 patterns, playfield 512, far background 41 slots of 16 patterns squeezed into table gaps. The far background draws only cells the playfield's opaque tiles do not hide.
 - **Never walk an unterminated sprite list every frame.** 256 entries cost more than a frame; the hardware layer rebuilds the sprite table only when the game flips its list flag (`0xFFE9B4`).
 - The arcade kernel masks interrupts with `0x2600` to shut out its level-2 VBlank; on the Mega Drive that also delays the level-6 VBlank.

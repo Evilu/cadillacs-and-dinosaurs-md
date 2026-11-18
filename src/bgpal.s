@@ -56,7 +56,8 @@ remap_copy:
     move.b  0(a1,d1.w), d0
     cmpi.b  #0xff, d0
     bne.s   1f
-    move.w  #1, q_request
+    addq.w  #1, d1
+    move.w  d1, q_request
     moveq   #0, d0
 1:  lea     LUT_PAL, a1
     moveq   #2, d3
@@ -109,17 +110,142 @@ remap_copy:
     dbra    d2, 6b
     rts
 
-| Called every frame before the layers are drawn
+| Called every frame before the layers are drawn. q_request holds 1 + the index
+| of a palette that has tiles but no pen map. If its colours are all close to
+| ones the line already has, it gets a map and nothing else changes; if not,
+| the line is chosen again.
 bgpal_update:
+    move.l  hal_frames, d0
+    andi.w  #7, d0
+    bne.s   9f
+    move.w  q_request, d6
+    beq.s   5f
+    subq.w  #1, d6
+    lea     PM_INDEX, a0
+    cmpi.b  #0xff, 0(a0,d6.w)
+    bne.s   8f
+    bsr.w   q_try_map
+    beq.s   8f
     move.l  hal_frames, d0
     andi.w  #31, d0
     bne.s   9f
-    tst.w   q_request
-    bne.s   bg_quantise
+    bra.w   bg_quantise
+5:  move.l  hal_frames, d0
+    andi.w  #31, d0
+    bne.s   9f
     bsr.w   q_signature
     cmp.l   q_sig, d0
-    bne.s   bg_quantise
+    bne.w   bg_quantise
 9:  rts
+8:  clr.w   q_request
+    rts
+
+| d4, d1 colour keys -> d1 squared distance
+dist2:
+    movem.l d0/d2-d4, -(sp)
+    moveq   #0, d3
+    move.w  d4, d2
+    andi.w  #15, d2
+    move.w  d1, d0
+    andi.w  #15, d0
+    sub.w   d0, d2
+    muls    d2, d2
+    add.w   d2, d3
+    lsr.w   #4, d4
+    lsr.w   #4, d1
+    move.w  d4, d2
+    andi.w  #15, d2
+    move.w  d1, d0
+    andi.w  #15, d0
+    sub.w   d0, d2
+    muls    d2, d2
+    add.w   d2, d3
+    lsr.w   #4, d4
+    lsr.w   #4, d1
+    sub.w   d1, d4
+    muls    d4, d4
+    add.w   d4, d3
+    move.w  d3, d1
+    movem.l (sp)+, d0/d2-d4
+    rts
+
+| d6 palette index -> EQ if it got a pen map onto the line as it is
+q_try_map:
+    lea     PM_INDEX, a0
+    moveq   #-1, d5
+    moveq   #63, d0
+1:  move.b  (a0)+, d1
+    cmpi.b  #0xff, d1
+    beq.s   2f
+    cmp.b   d5, d1
+    ble.s   2f
+    move.b  d1, d5
+2:  dbra    d0, 1b
+    addq.b  #1, d5
+    ext.w   d5
+    cmpi.w  #PM_SLOTS, d5
+    bhs.w   q_try_fail
+    move.w  d6, d0
+    lsl.w   #5, d0
+    addi.w  #0x800, d0
+    lea     PALETTES, a2
+    adda.w  d0, a2
+    lea     -144(sp), sp
+    movea.l sp, a5
+    movea.l sp, a1
+    clr.b   (a1)+
+    moveq   #14, d7
+3:  move.w  (a2)+, d4
+    andi.w  #0xeee, d4
+    lea     LINE_SRC, a3
+    lea     LINE_RAW, a4
+    move.w  #0x7fff, d3
+    moveq   #0, d2
+    moveq   #1, d0
+4:  tst.w   (a3)+
+    bmi.s   6f
+    move.w  (a4), d1
+    andi.w  #0xeee, d1
+    bsr.w   dist2
+    cmp.w   d3, d1
+    bhs.s   6f
+    move.w  d1, d3
+    move.w  d2, d0
+    addq.w  #1, d0
+6:  addq.l  #2, a4
+    addq.w  #1, d2
+    cmpi.w  #15, d2
+    blt.s   4b
+    cmpi.w  #24, d3
+    bhi.s   7f
+    move.b  d0, (a1)+
+    dbra    d7, 3b
+    lea     PM_INDEX, a0
+    move.b  d5, 0(a0,d6.w)
+    lsl.w   #4, d5
+    lea     PENMAP, a0
+    adda.w  d5, a0
+    movea.l a5, a1
+    move.l  (a1)+, (a0)+
+    move.l  (a1)+, (a0)+
+    move.l  (a1)+, (a0)+
+    move.l  (a1)+, (a0)+
+    lea     80(a5), a0
+    moveq   #15, d0
+8:  clr.l   (a0)+
+    dbra    d0, 8b
+    lea     80(a5), a0
+    st      0(a0,d6.w)
+    bsr.w   q_reload
+    bsr.w   q_signature
+    move.l  d0, q_sig
+    lea     144(sp), sp
+    moveq   #0, d0
+    rts
+7:  lea     144(sp), sp
+q_try_fail:
+    moveq   #1, d0
+    rts
 
 | Frame at a5: 0 sources, 30 keys, 60 positions, 78 count of the colours picked;
 | 80 per palette, nonzero if its pen map changed; 144 the pen map index and 208
@@ -483,7 +609,12 @@ q_done:
 4:  addq.w  #1, d6
     cmpi.w  #64, d6
     blt.s   1b
+    bsr.s   q_reload
+    lea     464(sp), sp
+    rts
 
+| a5 frame with a byte per palette at 80: loads again the tiles in VRAM whose palette is marked
+q_reload:
     moveq   #0, d6
 5:  move.w  d6, d0
     add.w   d0, d0
@@ -525,7 +656,6 @@ q_done:
 8:  addq.w  #1, d6
     cmpi.w  #S3_SLOTS, d6
     blt.s   7b
-    lea     464(sp), sp
     rts
 
 | -> d0 checksum of the colours (without brightness) of every mapped palette
