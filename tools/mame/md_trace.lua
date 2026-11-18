@@ -1,7 +1,8 @@
 -- Mega Drive VDP trace for MAME's genesis driver.
 -- Decodes every 68000 write to the VDP ports and logs per-frame transfer, palette
 -- and sprite statistics to md_frames.csv. Optional pad script drives the game.
--- env: TRACE_OUT (directory), TRACE_FRAMES (frames to run), TRACE_SNAP_EVERY (frames)
+-- env: TRACE_OUT (directory), TRACE_FRAMES (frames to run), TRACE_SNAP_EVERY (frames),
+--      TRACE_INPUT=none to leave the pads alone
 
 local out_dir = os.getenv("TRACE_OUT") or "."
 local max_frames = tonumber(os.getenv("TRACE_FRAMES") or "18000")
@@ -229,6 +230,7 @@ csv:write("frame,dma_vram,dma_cram,dma_vsram,dma_active,dma_ops,cpu_vram,cpu_cra
 
 local frame = 0
 local busy, quiet, in_game, game_frames = 0, 0, false, 0
+local scripted = os.getenv("TRACE_INPUT") ~= "none"
 local function on_frame()
   frame = frame + 1
   local n, vis, cells, mn, mp, over, np = sprite_stats()
@@ -242,12 +244,12 @@ local function on_frame()
 
   local t = frame
   if vis > 3 and moving then busy = busy + 1 else busy = 0 end
-  if busy > 60 then in_game = true quiet = 0 end
+  if busy > 60 and scripted then in_game = true quiet = 0 end
   if in_game then
     if vis == 0 then quiet = quiet + 1 else quiet = 0 end
     if quiet > 600 then in_game = false end
   end
-  local menu = not in_game and t > 240
+  local menu = not in_game and t > 240 and scripted
   press("P1 Start", menu and t % 150 < 6)
   press("P1 A", menu and t % 150 >= 70 and t % 150 < 74)
   local cyc = t % 300

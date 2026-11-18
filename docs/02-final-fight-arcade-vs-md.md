@@ -12,7 +12,7 @@ What the CPS-1 original does, what the fan-made Mega Drive port does instead, an
 
 The traces record, for every frame:
 
-- **Arcade:** the sprite list, the visible part of all three tilemaps, the palettes in use, the graphics on screen expressed in Mega Drive 8×8 patterns (only cells with visible pixels counted), and how often the scheduler polled for the next frame (a measure of CPU load).
+- **Arcade:** the sprite list, the visible part of all three tilemaps, the palettes in use, and the graphics on screen expressed in Mega Drive 8×8 patterns (only cells with visible pixels counted). A separate profiling run sampled the program counter to measure CPU load.
 - **Mega Drive:** every write to the VDP, decoded: DMA by size, target and source; palette changes; register writes during the visible picture; the sprite table after each frame. Full VRAM, CRAM and register dumps every 5 seconds (54 of them during gameplay).
 
 Both games were driven by a script (insert coin, start, walk right in bursts, fight in bursts). Each run stayed in stage 1 (the slums) and included deaths, a game over and a restart.
@@ -35,7 +35,7 @@ Reproduction steps are in [`tools/README.md`](../tools/README.md).
 | Code | Hand-written 68000 assembly | C compiled by GCC, on SGDK |
 | Program structure | 16-slot cooperative task kernel, game logic in tasks | One `main()` loop, SGDK library |
 | Frame driver | VBlank interrupt does all hardware updates | Main loop flushes a DMA queue at VBlank; the interrupt only sets a flag |
-| CPU | 68000 at 10 MHz; game work uses 56% of a frame on average | 68000 at 7.67 MHz |
+| CPU | 68000 at 10 MHz; real work uses 42% of a frame on average | 68000 at 7.67 MHz |
 | Resolution | 384×224 | 320×224 (H40) |
 | Sprites on screen (mean / p95 / max) | 133 / 208 / 225 tiles of 16×16 | 23 / 36 / 46 hardware sprites (242 / 384 / 451 cells of 8×8) |
 | Busiest sprite line (p95) | 42 tiles = 672 px | 328 px (the hardware limit is 320) |
@@ -87,21 +87,24 @@ flowchart TD
 
 ### 2.2 How busy the arcade CPU is
 
-When no task is runnable, the scheduler spins through the 16 slots, reading the frame flag once per slot (about 99 CPU cycles per read, from the instruction timings). Counting those reads per frame gives the time the CPU spent waiting; the rest is tasks, kernel calls and the VBlank handler.
+A sampling profiler (`tools/mame/cps1_profile.lua`) took about 200 samples of the program counter per frame and classed each as real work or waiting. Waiting happens in two places:
+
+- the scheduler's idle loop, and
+- a task in slot 11 (code at `0x4A8E`) that polls two work queues and a fast-forward condition and then yields, over and over. Its polling and the kernel calls it makes are not work the port has to reproduce every time: once per frame is enough.
 
 | Final Fight arcade, per gameplay frame | mean | p50 | p95 | p99 | max |
 |---|---|---|---|---|---|
-| Share of the frame spent working | 56% | 57% | 64% | 67% | 76% |
-| Cycles (of 167,700 at 10 MHz) | 94,000 | 96,000 | 107,000 | 112,000 | 127,000 |
+| Cycles of real work (of 167,700 at 10 MHz) | 71,000 | 73,000 | 88,000 | 95,000 | 116,000 |
+| Share of the frame | 42% | 43% | 52% | 56% | 69% |
 
-Load rises with the number of sprites: 42% of the frame with fewer than 50 sprite tiles on screen, 60% with 150–200.
+Load rises with the number of sprites: 39,000 cycles with fewer than 40 sprite tiles on screen, about 78,000 with 120–200.
 
 Against the Mega Drive's budget:
 
 - A Mega Drive frame is 128,000 cycles. No measured frame of Final Fight needed more.
-- With the CPU frozen for a full VBlank DMA, about 109,000 remain. 2.4% of frames needed more than that.
+- With the CPU frozen for a full VBlank DMA, about 109,000 remain. 0.04% of frames needed more than that.
 
-So Final Fight's original code would fit a Mega Drive frame almost always, but with little left over: the average frame leaves about 34,000 cycles for everything the arcade hardware did for free (translating sprite lists and tilemaps, managing VRAM). This is an estimate: the 99-cycle figure is computed, not measured, and a task that busy-waits would count as work.
+So Final Fight's original code would fit a Mega Drive frame with 57,000 cycles to spare on average and about 40,000 at the 95th percentile. With 200 samples a single frame's figure is good to about ±7,000 cycles, so the high percentiles are slightly overstated.
 
 ### 2.3 Final Fight MD: SGDK and C
 
@@ -346,7 +349,7 @@ What Final Fight MD shows works, and how it applies to the port described in [do
 7. **No raster effects needed** for the basic picture, which leaves CPU time for the game.
 8. **Sound: replace, don't translate.** Both games queue command numbers; the port can keep that queue and feed an XGM2-class driver with re-arranged music and PCM effects.
 
-Where we differ from Final Fight MD by design: it is a C rewrite, and we plan to keep Capcom's 68000 code. The shared kernel design and the narrow hardware interface support that plan. On CPU time, Final Fight's own code would fit a Mega Drive frame but with only about a quarter of the frame to spare on average ([section 2.2](#22-how-busy-the-arcade-cpu-is)). Cadillacs and Dinosaurs runs on a faster 12 MHz CPU and does use more: its measurements are in [doc 03](03-cadillacs-and-dinosaurs-measured.md).
+Where we differ from Final Fight MD by design: it is a C rewrite, and we plan to keep Capcom's 68000 code. The shared kernel design and the narrow hardware interface support that plan. On CPU time, Final Fight's own code would fit a Mega Drive frame with nearly half to spare on average ([section 2.2](#22-how-busy-the-arcade-cpu-is)), and Cadillacs and Dinosaurs is similar in steady play ([doc 03](03-cadillacs-and-dinosaurs-measured.md)).
 
 ## 10. Open items
 

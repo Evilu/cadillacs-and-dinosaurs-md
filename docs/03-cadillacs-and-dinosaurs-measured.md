@@ -11,7 +11,7 @@ What the arcade game puts on screen and how hard it works its CPU, measured with
 
 Everything here is stage 1 under scripted play. Later stages (vehicles, larger dinosaurs, more enemies) may be heavier. Counts cover the full 384-pixel-wide arcade picture.
 
-The CPU figures are estimates: we count how often the game's scheduler polled for the next frame (97.5 cycles per poll, from instruction timings) and treat the rest of the frame as work.
+The CPU figures come from a sampling profiler (`tools/mame/cps1_profile.lua`): about 200 samples of the program counter per frame, each classed as real work or not. With 200 samples a single frame's figure is good to about ±7,000 cycles, so the high percentiles are slightly overstated; averages over thousands of frames are solid.
 
 ## 1. At a glance
 
@@ -25,10 +25,11 @@ The CPU figures are estimates: we count how often the game's scheduler polled fo
 | Palettes in use (median) | 25 | 16 |
 | Graphics on screen, in 8×8 patterns (median / p95) | 1,675 / 1,823 | 1,241 / 1,503 |
 | Frames showing more than 1,536 patterns | 87% | 2% |
-| CPU work (mean) | 94,000 cycles, 56% of its frame | 108,000 cycles, 54% of its frame |
-| Frames needing more than a Mega Drive frame (128,000 cycles) | 0% | 6% in all; 0.1% outside bursts |
+| Real CPU work (mean) | 71,000 cycles, 42% of its frame | 65,000 cycles, 32% of its frame |
+| Real CPU work in steady play (mean / p95) | 71,000 / 88,000 | 62,000 / 91,000 |
+| Frames needing more than a Mega Drive frame (128,000 cycles) | 0% | 2.5%, all in bursts |
 
-Graphics are an easier fit than Final Fight's. CPU time is tighter.
+Graphics are an easier fit than Final Fight's, and in steady play the game's own code needs about half of a Mega Drive frame.
 
 ## 2. Sprites
 
@@ -86,45 +87,81 @@ xychart-beta
 
 ## 5. CPU time
 
-Cadillacs and Dinosaurs runs on the 12 MHz board, which gives it 201,000 cycles per frame.
+Cadillacs and Dinosaurs runs on the 12 MHz board, which gives it 201,000 cycles per frame. A Mega Drive frame is 128,000 cycles, or about 109,000 if the CPU is frozen for a full VBlank DMA.
 
-| Cadillacs and Dinosaurs, per frame | mean | p50 | p95 | p99 | max |
+### 5.1 What counts as work
+
+The scheduler's idle loop is not the only place the arcade program waits. One task (slot 15, code at `0x9E38C`) does nothing but check a fast-forward condition (both buttons held in certain states) and yield, thousands of times a second. Together with the kernel calls it makes, it uses about 19% of every frame. Final Fight has the same kind of task in slot 11 (`0x4A8E`), which also polls two work queues.
+
+Where the frame goes in steady play (1.65 million samples over 8,181 frames):
+
+```mermaid
+pie showData
+    title Cadillacs and Dinosaurs, share of a 12 MHz frame in steady play
+    "Scheduler idle loop" : 52
+    "Polling task and its kernel calls" : 19
+    "Real work" : 29
+```
+
+On the Mega Drive the polling task only needs to run once per frame, so its cost disappears. An earlier version of this document counted it as work and concluded the CPU budget was nearly exhausted; that was wrong.
+
+### 5.2 Real work per frame
+
+| Cycles of real work per frame | mean | p50 | p95 | p99 | max |
 |---|---|---|---|---|---|
-| Share of the frame spent working, all frames | 54% | 53% | 64% | 96% | 100% |
-| Cycles, all frames | 108,000 | 107,000 | 130,000 | 193,000 | 201,000 |
-| Cycles, outside bursts | 105,000 | 105,000 | 120,000 | 125,000 | — |
+| Cadillacs and Dinosaurs, all frames | 65,000 | 62,000 | 97,000 | 185,000 | 201,000 |
+| Cadillacs and Dinosaurs, outside bursts | 62,000 | 62,000 | 91,000 | 102,000 | — |
+| Final Fight (10 MHz), gameplay | 71,000 | 73,000 | 88,000 | 95,000 | 116,000 |
 
-**Bursts.** 6% of frames need more than an entire Mega Drive frame (128,000 cycles). They are not spread evenly: 2,495 frames sit in 20 bursts, the two longest about 10 and 7 seconds. The bursts recur at the same points after each game start, and the snapshots nearest the long ones show a dialogue scene and the continue screen. We read them as scene set-up, cutscenes and screens where the game is not being played, where slowing down would not be felt. That reading needs confirming burst by burst.
-
-**Steady play.** Outside the bursts (17,668 frames):
-
-- The game's own work averages 105,000 cycles and reaches 120,000 at the 95th percentile.
-- Only 0.1% of frames exceed a Mega Drive frame.
-- 31% exceed 109,000 cycles, which is what is left of a Mega Drive frame when the CPU is frozen for a full VBlank DMA.
-- Load rises with sprites on screen: 48% of the frame with fewer than 40 sprite tiles, 59% with 120 or more.
+- **Steady play fits with room to spare.** The average frame needs 62,000 cycles, about half of a Mega Drive frame. At the 95th percentile it needs 91,000, leaving 37,000 (18,000 if a full VBlank DMA also runs). Only 0.3% of steady frames need more than 109,000.
+- **Load follows the sprite count:** 47,000 cycles with fewer than 40 sprite tiles on screen, 59,000 with 40–80, 70,000 with 80–120, 84,000 with 120–160.
+- **Bursts are real.** 2.5% of frames need more than a whole Mega Drive frame, and in those the arcade program uses its entire 12 MHz frame. They come in about a dozen runs of 15–115 frames that recur at the same points after each game start (around the character select, the stage intro, the dialogue scene, the continue screen). We read them as scene set-up and non-interactive screens; that needs confirming run by run.
 
 ```mermaid
 xychart-beta
-    title "CPU cycles of game work per frame, outside bursts"
+    title "Real CPU work per frame against the Mega Drive budget"
     x-axis ["Final Fight mean", "Final Fight p95", "Cadillacs mean", "Cadillacs p95", "MD frame minus VBlank DMA", "MD whole frame"]
     y-axis "68000 cycles" 0 --> 140000
-    bar [94000, 107000, 105000, 120000, 109000, 128000]
+    bar [71000, 88000, 62000, 91000, 109000, 128000]
 ```
 
-**What this means.** Capcom's code, unchanged, would just about fit a Mega Drive frame during play, leaving roughly 23,000 cycles on average and 8,000 in busy moments. That is not enough for the work the port adds: rebuilding the sprite table, feeding tilemap changes to the planes, and managing VRAM. A 60 fps port that keeps the original code therefore has to make the code cheaper, not only the graphics.
+### 5.3 Where the real work goes
+
+Shares of real work in steady play, by routine, counting a routine whenever it is on the call stack:
+
+| Routine | Share | What it is (from the disassembly) |
+|---|---|---|
+| `0xE90E` | 48% | The per-frame game loop: calls each subsystem in turn |
+| `0x13FA6` | 24% | **Sprite list builder.** Picks the back buffer, sorts the draw list by depth with a bubble sort, calls `0x141F8` per object to write sprite entries, ends the list, flips the buffer |
+| `0x141F8` | 16% | Writes one object's sprite entries (inside the 24% above) |
+| `0x23420` | 21% | Update loop over 24 objects of 224 bytes, each dispatched through a state jump table (enemies, by its position in RAM) |
+| `0x18834`, `0x10546`, `0x18952` | 6–7% each | Not yet identified |
+| `0x233C6` | 5% | Update loop over 24 objects of 192 bytes |
+| VBlank handler `0x542` | 2% | Hardware updates, inputs, sound queue |
+
+The object dispatcher at `0xA954` is on the stack in 87% of real-work samples: nearly everything runs as object handlers.
+
+**The sprite list builder is the single largest item, about a quarter of real work (roughly 15,000 cycles a frame).** It is also exactly the code the port has to replace, because it writes the arcade's sprite format. A replacement that writes Mega Drive sprites directly costs nothing extra if it is no slower than the original.
 
 ## 6. Consequences for the port
 
-1. **Keep the plan to run Capcom's code, but budget for replacing parts of it.** The prime candidates are the routines that only build arcade video tables (sprite list, tilemap writers, palette writers). Writing Mega Drive data directly from those routines removes both their arcade cost and a separate translation pass.
-2. **Profile before choosing.** We know how much time the game uses per frame, not where it goes. The next measurement is a per-routine profile of steady play.
-3. **Sprites convert mechanically.** Blocks of 2.8 tiles on average can be cut into 32×32 pieces from the list itself, with rules for the 2% of frames over 80 sprites and the 30% with an over-full line.
-4. **VRAM is less of a fight than in Final Fight.** A typical frame fits; the work is headroom and palettes, not wholesale background cuts.
-5. **Palettes: 16 into 4.** Same per-scene method as Final Fight MD, from a smaller starting set.
-6. **Allow slowdown where the arcade is already saturated.** In the bursts the arcade program itself uses its whole 12 MHz frame, so those moments cannot be matched cycle for cycle; if they are cutscenes and menus, running them slower is acceptable.
+1. **Running Capcom's code at 60 fps looks feasible in steady play.** Its real work averages about half of a Mega Drive frame, leaving 47,000–66,000 cycles for the port's own video work, and 18,000–37,000 at the 95th percentile.
+2. **Run the polling task once per frame.** It is the cheapest saving available: about 19% of the arcade frame for one patch.
+3. **Replace the sprite list builder first.** A quarter of real work, and it has to be rewritten anyway. Its depth sort is a bubble sort and could be made cheaper at the same time.
+4. **Sprites convert mechanically.** Blocks of 2.8 tiles on average can be cut into 32×32 pieces from the list itself, with rules for the 2% of frames over 80 sprites and the 30% with an over-full line.
+5. **VRAM is less of a fight than in Final Fight.** A typical frame fits; the work is headroom and palettes, not wholesale background cuts.
+6. **Palettes: 16 into 4.** Same per-scene method as Final Fight MD, from a smaller starting set.
+7. **Expect slowdown in the bursts.** There the arcade program itself fills its whole 12 MHz frame, so those moments cannot be matched cycle for cycle. If they are scene set-up and non-interactive screens, running them slower is acceptable.
 
-## 7. Open items
+## 7. Checking the port in an emulator
 
-- **Per-routine CPU profile** of steady play, to find what to replace.
+- **Automated checks: MAME's Mega Drive driver.** It runs headless, takes scripted pad input, saves snapshots, and our Lua script decodes every VDP write. `tools/check_md.sh <rom> <out dir>` runs a ROM for a set number of frames and reports whether the CPU is running or stuck in an exception handler, the picture width, sprites, colours, the largest per-frame DMA and any sprite-limit overflow.
+- **Playing and timing accuracy: BlastEm 1.0.0.** It is the usual reference for VDP timing and has a debugger, but it needs a window, so it is for hands-on testing, not automated runs.
+- **Real hardware or a flash cart** remains the final check for DMA timing and sound.
+
+## 8. Open items
+
+- **Identify the remaining hot routines** (`0x18834`, `0x10546`, `0x18952`) and the object classes behind the two update loops.
 - **Classify the bursts:** which fall in live play, which in cutscenes, loading and menus.
 - **Later stages:** the same trace for every stage, especially the driving stage and the large bosses.
 - **Layer renders:** render scroll 1, 2 and 3 separately to confirm what each carries and to see the tiles that draw in front of sprites.

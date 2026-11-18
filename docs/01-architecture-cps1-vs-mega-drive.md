@@ -159,7 +159,7 @@ Speed is the difference:
 
 So the Mega Drive has roughly 55–64% of the arcade's CPU time per frame, and the hardware layer we add also has to run inside that budget. Slowdown in busy scenes is a real risk; a 30 fps fallback under load (as Final Fight MD offers) is the usual answer.
 
-These ratios compare capacity, not need: they only matter to the extent the arcade program uses its frame. Measured on Final Fight, the arcade's game work takes 56% of a 10 MHz frame on average and would fit a Mega Drive frame with about a quarter to spare ([doc 02, section 2.2](02-final-fight-arcade-vs-md.md#22-how-busy-the-arcade-cpu-is)). Cadillacs and Dinosaurs uses more: about 105,000 cycles per frame in steady play, which leaves the Mega Drive little spare ([doc 03](03-cadillacs-and-dinosaurs-measured.md)).
+These ratios compare capacity, not need: they only matter to the extent the arcade program uses its frame. Measured with a profiler, Final Fight's real work averages 71,000 cycles per frame and Cadillacs and Dinosaurs' 62,000 in steady play, about half of a Mega Drive frame. Much of the rest of the arcade frame goes to an idle loop and a task that only polls ([doc 02, section 2.2](02-final-fight-arcade-vs-md.md#22-how-busy-the-arcade-cpu-is), [doc 03, section 5](03-cadillacs-and-dinosaurs-measured.md#5-cpu-time)).
 
 ### 2.2 Memory maps
 

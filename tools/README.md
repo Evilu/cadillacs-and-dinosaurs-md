@@ -59,3 +59,26 @@ python3 tools/analysis/md_vdp_dump.py analysis/mame/ffmd_run/vdp_019200.bin --re
 ```
 
 `summarise_traces.py` prints per-metric distributions for gameplay frames and the arcade CPU load (`--clock 12e6` for `dino`); `md_vdp_dump.py` prints the VRAM layout and which patterns, palette lines and priority bits each plane and the sprites use, and can render each layer to PNG.
+
+## 5. Profile the arcade CPU
+
+```sh
+TRACE_OUT=dino_prof TRACE_FRAMES=21600 TASK_PTR=ff0158 TASK_BASE=ff0052 \
+  IDLE=83c-8a2 KERNEL=8a2-a40 SPIN_SLOT=15 SPIN=9e38c-9e41c \
+  mame dino -rompath <rom folders> -video none -sound none -skip_gameinfo -nothrottle \
+  -seconds_to_run 400 -autoboot_script ../../tools/mame/cps1_profile.lua
+python3 tools/analysis/profile_report.py analysis/mame/dino_prof analysis/out/dino_prg/functions.tsv
+```
+
+`mame/cps1_profile.lua` samples the program counter about 200 times a frame, with the current task slot and a heuristic call stack, and writes per-frame work counts (`profile_frames.csv`) and per-address totals. `PROFILE_FRAMES` limits the per-address totals to listed frames. For `ffight`: `TASK_PTR=ff1106 TASK_BASE=ff1000 ROM_SIZE=100000 IDLE=752-7cc KERNEL=7cc-984 SPIN_SLOT=11 SPIN=4a8e-4b32`.
+
+The `idle_reads` column of `cps1_trace.lua` and the CPU-load lines of `summarise_traces.py` are an older estimate that counts the polling task as work; use the profiler's figures.
+
+## 6. Check a Mega Drive ROM
+
+```sh
+tools/check_md.sh <rom.bin> <out dir> [frames] [snapshot every N frames]
+```
+
+Runs the ROM headless in MAME's `genesis` driver with no input and reports whether the CPU is running, plus picture width, sprites, colours, the largest per-frame DMA and sprite-limit overflow. Snapshots and VDP dumps land in the output folder. BlastEm (`brew install blastem`) is the choice for hands-on testing; it needs a window.
+
