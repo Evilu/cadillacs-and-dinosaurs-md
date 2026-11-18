@@ -11,7 +11,7 @@ ROM layout:
   0x000000  arcade program (patched)
   0x180000  hardware layer
   0x187F00  colour table: [brightness][nibble] -> Mega Drive level << 1
-  0x188000  tile flags: one byte per arcade 16x16 tile, nonzero if it has pixels
+  0x188000  tile flags: one byte per arcade 16x16 tile, bit 0 if it has pixels, bit 1 if it has no transparent pixel
   0x190000  patch table: count, then per instruction replaced by TRAP #8:
             long address, word length, four words of the original instruction
   0x200000  all 32768 arcade 16x16 tiles as four Mega Drive patterns each
@@ -36,6 +36,8 @@ TILE_FLAGS = 0x188000
 PATCH_TABLE = 0x190000
 PATCH_HASH = 0x198000
 PATCH_HASH_SIZE = 1024
+TILE_FLAGS3 = 0x1A0000
+FAR_TILES = (0x1C00, 0x2000)
 TILE_DATA = 0x200000
 
 IO_RELOCATIONS = [
@@ -168,7 +170,7 @@ def apply_fast_paths(rom, sym, report):
     return covered
 
 
-STORED_TABLES = [(0x90c000, 0x910000)]
+STORED_TABLES = [(0x90c000, 0x914000)]
 
 
 def drop_replacement(ins):
@@ -248,11 +250,26 @@ def convert_tiles(gfx):
     bits = np.unpackbits(tiles, axis=3).reshape(-1, 16, 2, 4, 8)
     pen = (bits[:, :, :, 3] << 3) | (bits[:, :, :, 2] << 2) | (bits[:, :, :, 1] << 1) | bits[:, :, :, 0]
     pixels = pen.reshape(-1, 16, 16)
-    flags = (pixels != 15).any(axis=(1, 2)).astype(np.uint8)
+    flags = (pixels != 15).any(axis=(1, 2)).astype(np.uint8) | ((pixels != 15).all(axis=(1, 2)).astype(np.uint8) << 1)
     md = np.where(pixels == 15, 0, pixels + 1).astype(np.uint8)
     packed = (md[:, :, 0::2] << 4) | md[:, :, 1::2]
     quads = [packed[:, 0:8, 0:4], packed[:, 8:16, 0:4], packed[:, 0:8, 4:8], packed[:, 8:16, 4:8]]
     data = np.stack(quads, axis=1).reshape(len(packed), 128)
+    return data.tobytes(), flags.tobytes()
+
+
+def convert_far_tiles(gfx):
+    first, end = FAR_TILES
+    raw = np.frombuffer(gfx[first * 512:end * 512], dtype=np.uint8).reshape(-1, 32, 4, 4)
+    bits = np.unpackbits(raw, axis=3).reshape(-1, 32, 4, 4, 8)
+    pen = (bits[:, :, :, 3] << 3) | (bits[:, :, :, 2] << 2) | (bits[:, :, :, 1] << 1) | bits[:, :, :, 0]
+    pixels = pen.reshape(-1, 32, 32)
+    md = np.where(pixels == 15, 0, pixels + 1).astype(np.uint8)
+    packed = (md[:, :, 0::2] << 4) | md[:, :, 1::2]
+    cells = [packed[:, y * 8:y * 8 + 8, x * 4:x * 4 + 4] for x in range(4) for y in range(4)]
+    data = np.stack(cells, axis=1).reshape(len(packed), 512)
+    flags = np.zeros(0x2000, dtype=np.uint8)
+    flags[first:end] = (pixels != 15).any(axis=(1, 2))
     return data.tobytes(), flags.tobytes()
 
 
@@ -324,9 +341,16 @@ def main(prg_path, gfx_path, access_path, out_path):
     rom += flags
     rom += b'\xff' * (PATCH_TABLE - len(rom))
     rom += patch_table
+    far_tiles, far_flags = convert_far_tiles(Path(gfx_path).read_bytes())
+    assert len(rom) <= TILE_FLAGS3
+    rom += b'\xff' * (TILE_FLAGS3 - len(rom))
+    rom += far_flags
     assert len(rom) <= TILE_DATA
     rom += b'\xff' * (TILE_DATA - len(rom))
+    tiles = bytearray(tiles)
+    tiles[FAR_TILES[0] * 512:FAR_TILES[1] * 512] = far_tiles
     rom += tiles
+    report.append(f'far background: {sum(far_flags)} of {FAR_TILES[1] - FAR_TILES[0]} 32x32 tiles have pixels')
     rom[0x100:0x200] = header(len(rom) - 1)
     checksum = sum(struct.unpack_from(f'>{(len(rom) - 0x200) // 2}H', rom, 0x200)) & 0xffff
     struct.pack_into('>H', rom, 0x18e, checksum)
@@ -334,7 +358,7 @@ def main(prg_path, gfx_path, access_path, out_path):
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     Path(out_path).write_bytes(rom)
     report.append(f'hardware layer: {len(hal)} bytes at {HAL_BASE:06x}; {len(flags)} tiles converted, '
-                  f'{sum(flags)} with pixels; ROM {len(rom) // 1024} KB -> {out_path}')
+                  f'{np.count_nonzero(np.frombuffer(flags, dtype=np.uint8))} with pixels; ROM {len(rom) // 1024} KB -> {out_path}')
     print('\n'.join(report))
 
 

@@ -35,7 +35,7 @@
     .equ SHOWN_FLAG,    0xffe9b4    | nonzero: list B is the finished one
 
     .equ COLOUR_TABLE,  0x187f00    | [brightness][nibble] -> Mega Drive 3-bit level << 1
-    .equ TILE_FLAGS,    0x188000    | per arcade 16x16 tile: nonzero if it has pixels
+    .equ TILE_FLAGS,    0x188000    | per arcade 16x16 tile: bit 0 has pixels, bit 1 fully opaque
     .equ TILE_FIRST,    0x0000      | all 32768 arcade 16x16 tiles are stored
     .equ TILE_END,      0x8000
     .equ TILE_DATA,     0x200000    | ROM address of tile 0, 128 bytes per tile
@@ -46,7 +46,7 @@
     .equ MAX_QUEUE,     22
     .equ MAX_SPRITES,   80
 
-    .equ HAL_STACK_LO,  0xff19a0
+    .equ HAL_STACK_LO,  0xff1c20
     .equ HAL_STACK_TOP, 0xff2000
 
 | The arcade's supervisor stack (0xff0e66) sits just above its task stacks and
@@ -156,6 +156,7 @@ hal_vblank:
 hal_after:
     bsr.w   build_sprites
     bsr.w   update_scroll2
+    bsr.w   update_scroll3
     bsr.w   build_cram
     movem.l (sp)+, d0-d7/a0-a6
     hal_leave
@@ -188,10 +189,10 @@ flush_video:
     lsl.w   #2, d2
     bsr.s   dma_to_vram
 3:  move.l  #0x70000003, (a4)
-    move.w  #0, VDP_DATA
+    move.w  s3_hscroll, VDP_DATA
     move.w  s2_hscroll, VDP_DATA
     move.l  #0x40000010, (a4)
-    move.w  #0, VDP_DATA
+    move.w  s3_vscroll, VDP_DATA
     move.w  s2_vscroll, VDP_DATA
     move.l  #0xc0000000, (a4)
     lea     CRAM_BUF, a0
@@ -536,7 +537,7 @@ count_palettes:
     dbra    d7, 2b
 3:  rts
 
-| The three sprite lines are 0, 1 and 3; line 2 belongs to the playfield.
+| Sprites get lines 0 and 1; line 2 belongs to the playfield, line 3 to the far background.
 assign_lines:
     lea     pal_line, a2
     moveq   #7, d0
@@ -547,7 +548,7 @@ assign_lines:
     move.l  #0xffffffff, (a3)
     moveq   #0, d3
 2:  cmpi.w  #2, d3
-    beq.s   5f
+    bhs.s   5f
     lea     PAL_COUNT, a1
     moveq   #0, d1
     moveq   #-1, d2
@@ -582,10 +583,17 @@ build_cram:
     moveq   #0, d0
     move.b  (a3)+, d0
     cmpi.w  #1, d7
-    bne.s   6f
+    bne.s   9f
     move.w  s2_pal, d0
     lsl.w   #5, d0
     lea     PALETTES + 0x800, a2
+    adda.w  d0, a2
+    bra.s   7f
+9:  tst.w   d7
+    bne.s   6f
+    move.w  s3_pal, d0
+    lsl.w   #5, d0
+    lea     PALETTES + 0xc00, a2
     adda.w  d0, a2
     bra.s   7f
 6:  tst.b   d0
@@ -688,3 +696,4 @@ vdp_init:
 vdp_init_end:
 
     .include "background.s"
+    .include "farbg.s"

@@ -13,7 +13,8 @@
     .equ S2_END,        0x910000
     .equ S2_STORE,      0xff4000    | (col << 5 | row & 31) * 4: code word, attribute word
     .equ PLANE_B,       0xc000
-    .equ S2_SLOTS,      200
+    .equ S2_SLOTS,      128         | patterns 0x220-0x41f
+    .equ S2_W,          23          | columns drawn: the 21 visible ones plus one each side
     .equ S2_PATTERN,    0x220       | first VRAM pattern of the playfield tile cache
     .equ HASH,          0xff7000    | 512 entries: tile code (0xffff empty), slot
     .equ HASH_END,      HASH + 2048
@@ -23,6 +24,7 @@
     .equ RING_SLOT,     0xff7c00    | per ring cell (32 x 16): slot, 0xff for none
     .equ DIRTY,         0xff7e00    | 64 words: col << 8 | row
     .equ BG_VARS,       0xff7e80
+    .equ COVER,         0xff7f00    | 32 longs, one per ring column: bit r set if store row r shows a fully opaque tile
     .equ free_top,      BG_VARS
     .equ dirty_count,   BG_VARS + 2
     .equ s2_valid,      BG_VARS + 4
@@ -35,6 +37,8 @@
     .equ u_count,       BG_VARS + 18
     .equ r_col,         BG_VARS + 20
     .equ r_row,         BG_VARS + 22
+    .equ cam2_x,        BG_VARS + 26
+    .equ cam2_y,        BG_VARS + 28
     .equ r_attr,        BG_VARS + 24
     .equ S2_PAL_COUNT,  BG_VARS + 32
     .equ ARCADE_FILL_END, 0x000ba8
@@ -64,7 +68,7 @@ bg_init:
     clr.w   s2_valid
     clr.w   s2_full
     clr.w   s2_pal
-    rts
+    bra.w   s3_init
 
 | ---------------------------------------------------------------- tile cache
 
@@ -226,6 +230,17 @@ render_cell:
     movea.l (sp)+, a0
     move.b  #0xff, (a0)
 1:  move.w  d6, d0
+    andi.w  #31, d0
+    lsl.w   #2, d0
+    lea     COVER, a1
+    adda.w  d0, a1
+    move.w  d7, d1
+    andi.w  #31, d1
+    move.l  (a1), d2
+    bclr    d1, d2
+    move.l  d2, (a1)
+    move.w  #S3_W, s3_pending
+    move.w  d6, d0
     andi.w  #63, d0
     lsl.w   #5, d0
     move.w  d7, d1
@@ -236,16 +251,31 @@ render_cell:
     adda.w  d0, a1
     move.w  2(a1), r_attr
     move.w  (a1), d0
-    bmi.s   cell_blank
+    bmi.w   cell_blank
     lea     TILE_FLAGS, a1
-    tst.b   0(a1,d0.w)
-    beq.s   cell_blank
+    move.b  0(a1,d0.w), d1
+    beq.w   cell_blank
     move.l  a0, -(sp)
+    move.w  d1, -(sp)
     bsr.w   s2_acquire
+    move.w  (sp)+, d1
     movea.l (sp)+, a0
     tst.w   d5
-    bmi.s   cell_blank
+    bmi.w   cell_blank
     move.b  d5, (a0)
+    btst    #1, d1
+    beq.s   12f
+    move.w  d6, d0
+    andi.w  #31, d0
+    lsl.w   #2, d0
+    lea     COVER, a1
+    adda.w  d0, a1
+    move.w  d7, d1
+    andi.w  #31, d1
+    move.l  (a1), d2
+    bset    d1, d2
+    move.l  d2, (a1)
+12:
     lsl.w   #2, d5
     addi.w  #S2_PATTERN, d5
     move.w  r_attr, d0
@@ -318,6 +348,30 @@ vram_write_at:
     move.w  d1, VDP_CTRL
     rts
 
+| d3 arcade column: releases the tiles of its 16 ring cells
+clear_column:
+    andi.w  #31, d3
+    move.w  d3, d0
+    lsl.w   #2, d0
+    lea     COVER, a0
+    clr.l   0(a0,d0.w)
+    lea     RING_SLOT, a0
+    adda.w  d3, a0
+    move.w  #15, -(sp)
+1:  moveq   #0, d5
+    move.b  (a0), d5
+    cmpi.b  #0xff, d5
+    beq.s   2f
+    move.b  #0xff, (a0)
+    move.l  a0, -(sp)
+    bsr.w   s2_release
+    movea.l (sp)+, a0
+2:  lea     32(a0), a0
+    subq.w  #1, (sp)
+    bpl.s   1b
+    addq.l  #2, sp
+    rts
+
 | d3 arcade column
 render_column:
     move.w  d3, r_col
@@ -338,6 +392,7 @@ update_scroll2:
     move.w  IO_SHADOW + 0x110, d0
     addi.w  #96, d0
     andi.w  #0x3ff, d0
+    move.w  d0, cam2_x
     move.w  d0, d2
     neg.w   d2
     andi.w  #0x3ff, d2
@@ -345,9 +400,10 @@ update_scroll2:
     move.w  IO_SHADOW + 0x112, d1
     addi.w  #16, d1
     andi.w  #0x3ff, d1
+    move.w  d1, cam2_y
     move.w  d1, s2_vscroll
     lsr.w   #4, d0
-    subq.w  #4, d0
+    subq.w  #1, d0
     andi.w  #63, d0
     lsr.w   #4, d1
     andi.w  #63, d1
@@ -364,11 +420,13 @@ update_scroll2:
     cmpi.w  #32, d2
     bhs.s   backward
     cmpi.w  #8, d2
-    bhi.s   full_redraw
+    bhi.w   full_redraw
     subq.w  #1, d2
     move.w  d2, u_count
 1:  move.w  s2_col0, d3
-    addi.w  #32, d3
+    bsr.w   clear_column
+    move.w  s2_col0, d3
+    addi.w  #S2_W, d3
     andi.w  #63, d3
     bsr.w   render_column
     move.w  s2_col0, d0
@@ -377,7 +435,7 @@ update_scroll2:
     move.w  d0, s2_col0
     subq.w  #1, u_count
     bpl.s   1b
-    bra.s   process_dirty
+    bra.w   process_dirty
 backward:
     moveq   #64, d3
     sub.w   d2, d3
@@ -390,6 +448,9 @@ backward:
     andi.w  #63, d3
     move.w  d3, s2_col0
     bsr.w   render_column
+    move.w  s2_col0, d3
+    addi.w  #S2_W, d3
+    bsr.w   clear_column
     subq.w  #1, u_count
     bpl.s   2b
     bra.s   process_dirty
@@ -401,6 +462,11 @@ full_redraw:
     clr.w   s2_full
     clr.w   dirty_count
     move.w  #31, u_count
+5:  move.w  u_count, d3
+    bsr.w   clear_column
+    subq.w  #1, u_count
+    bpl.s   5b
+    move.w  #S2_W - 1, u_count
 3:  move.w  s2_col0, d3
     add.w   u_count, d3
     andi.w  #63, d3
@@ -440,7 +506,7 @@ scan_palette:
     lea     S2_PAL_COUNT, a0
     lea     S2_STORE + 2, a1
     move.w  s2_col0, d6
-    addq.w  #4, d6
+    addq.w  #1, d6
     moveq   #10, d5
 6:  move.w  s2_row0, d7
     moveq   #7, d4
@@ -521,7 +587,7 @@ s2_write:
     move.w  d2, d4
     sub.w   s2_col0, d4
     andi.w  #63, d4
-    cmpi.w  #32, d4
+    cmpi.w  #S2_W, d4
     bhs.s   9f
     move.w  d3, d4
     sub.w   s2_row0, d4
@@ -549,8 +615,11 @@ gfx_read_w:
     cmpi.l  #S2_BASE, d0
     blo.s   1f
     cmpi.l  #S2_END, d0
-    bhs.s   1f
+    bhs.s   2f
     bra.w   s2_read
+2:  cmpi.l  #S3_END, d0
+    bhs.s   1f
+    bra.w   s3_read
 1:  moveq   #0, d1
     rts
 
@@ -559,8 +628,11 @@ gfx_write_w:
     cmpi.l  #S2_BASE, d0
     blo.s   1f
     cmpi.l  #S2_END, d0
-    bhs.s   1f
+    bhs.s   2f
     bra.w   s2_write
+2:  cmpi.l  #S3_END, d0
+    bhs.s   1f
+    bra.w   s3_write
 1:  rts
 
 | ---------------------------------------------------------------- fast paths
@@ -634,13 +706,22 @@ hal_fill:
     cmpi.l  #GFX_HI, d2
     bhs.s   3f
     cmpi.l  #S2_BASE, d2
-    bne.s   2f
+    bne.s   5f
     lea     S2_STORE, a2
     move.w  #2047, d3
 1:  move.w  d0, (a2)+
     move.w  d1, (a2)+
     dbra    d3, 1b
     move.w  #1, s2_full
+    bra.s   2f
+5:  cmpi.l  #S3_BASE, d2
+    bne.s   2f
+    lea     S3_STORE, a2
+    move.w  #1023, d3
+6:  move.w  d0, (a2)+
+    move.w  d1, (a2)+
+    dbra    d3, 6b
+    move.w  #1, s3_full
 2:  movea.l a1, a0
     bra.s   4f
 3:  move.w  d0, (a0)+
