@@ -8,6 +8,20 @@ Facts come from three places, and the text says which:
 - **MAME / docs** — read from MAME's source, jotego's FPGA core notes, SGDK headers, plutiedev and similar; links are in [Sources](#sources).
 - **Unverified** — recalled or second-hand; collected in [Open questions](#open-questions).
 
+## Target
+
+The goal is a port that is as close to arcade-perfect as the Mega Drive allows, using the kind of techniques Final Fight MD used to get around the console's limits. The bar, per area:
+
+| Area | Target | Hard limit that applies |
+|---|---|---|
+| Gameplay and input | Identical to the arcade: same logic, timing and response, three players | None, if the arcade code runs; CPU time is the risk |
+| Frame rate | 60 fps like the arcade | About 55–64% of the arcade's CPU time per frame |
+| Graphics | All arcade art, animation frames and effects; nothing cut | 320 px width; 80 sprites, 320 sprite pixels per line; pattern upload budget |
+| Colour | As close to the arcade palette as possible in every scene | 61 colours on screen from 512, against up to 1,920 from 65,536 |
+| Sound | Full soundtrack, effects and voices | FM + PSG + software-mixed PCM in place of 16-voice QSound |
+
+Gameplay, input and content can match the arcade. Colour depth, screen width and the sound chip cannot be matched exactly on stock hardware; there the target is the best achievable approximation, judged side by side with the arcade.
+
 ## 1. Summary
 
 | | CPS-1 (`dino`, CP System Dash) | Mega Drive (NTSC) | Consequence |
