@@ -19,6 +19,7 @@
     .equ e_flip,        HAL_VARS + 26
     .equ line_pal,      HAL_VARS + 28   | 4 bytes: arcade sprite palette shown in each CRAM line
     .equ pal_line,      HAL_VARS + 32   | 32 bytes: CRAM line used for each arcade sprite palette
+    .equ pal_known,     HAL_VARS + 68   | bit p: pal_line[p] chosen for the current lines
     .equ last_flag,     HAL_VARS + 64   | SHOWN_FLAG when the sprite table was last built
     .equ ent_left,      HAL_VARS + 66
     .equ RAW_CACHE,     0xff1920    | arcade colour last converted for each CRAM entry
@@ -538,37 +539,142 @@ count_palettes:
 3:  rts
 
 | Sprites get lines 0 and 1; line 2 belongs to the playfield, line 3 to the far background.
+| A line keeps its palette while that palette is on screen, unless another covers more
+| than twice its area. Palettes without a line use the line whose colours are closest.
 assign_lines:
-    lea     pal_line, a2
-    moveq   #7, d0
-1:  clr.l   (a2)+
-    dbra    d0, 1b
-    lea     pal_line, a2
-    lea     line_pal, a3
-    move.l  #0xffffffff, (a3)
-    moveq   #0, d3
-2:  cmpi.w  #2, d3
-    bhs.s   5f
+    movem.l d0-d7/a0-a5, -(sp)
     lea     PAL_COUNT, a1
-    moveq   #0, d1
+    lea     line_pal, a3
+    move.w  (a3), -(sp)
+    moveq   #1, d3
+1:  moveq   #0, d0
+    move.b  0(a3,d3.w), d0
+    cmpi.b  #0xff, d0
+    beq.s   2f
+    add.w   d0, d0
+    tst.w   0(a1,d0.w)
+    bne.s   2f
+    move.b  #0xff, 0(a3,d3.w)
+2:  dbra    d3, 1b
+    moveq   #1, d7
+3:  moveq   #0, d1
     moveq   #-1, d2
     moveq   #0, d0
-3:  cmp.w   (a1)+, d1
-    bcc.s   4f
-    move.w  -2(a1), d1
+4:  cmp.b   (a3), d0
+    beq.s   5f
+    cmp.b   1(a3), d0
+    beq.s   5f
+    move.w  d0, d4
+    add.w   d4, d4
+    move.w  0(a1,d4.w), d4
+    cmp.w   d4, d1
+    bcc.s   5f
+    move.w  d4, d1
     move.w  d0, d2
-4:  addq.w  #1, d0
+5:  addq.w  #1, d0
     cmpi.w  #32, d0
-    blt.s   3b
-    move.b  d2, 0(a3,d3.w)
-    bmi.s   5f
-    move.b  d3, 0(a2,d2.w)
-    lea     PAL_COUNT, a1
-    add.w   d2, d2
-    clr.w   0(a1,d2.w)
-5:  addq.w  #1, d3
-    cmpi.w  #4, d3
-    blt.s   2b
+    blt.s   4b
+    tst.w   d2
+    bmi.s   9f
+    moveq   #0, d3
+    cmpi.b  #0xff, (a3)
+    beq.s   8f
+    moveq   #1, d3
+    cmpi.b  #0xff, 1(a3)
+    beq.s   8f
+    moveq   #0, d0
+    move.b  (a3), d0
+    add.w   d0, d0
+    move.w  0(a1,d0.w), d4
+    moveq   #0, d0
+    move.b  1(a3), d0
+    add.w   d0, d0
+    move.w  0(a1,d0.w), d5
+    moveq   #0, d3
+    cmp.w   d4, d5
+    bcc.s   7f
+    moveq   #1, d3
+    move.w  d5, d4
+7:  add.w   d4, d4
+    cmp.w   d4, d1
+    bls.s   9f
+8:  move.b  d2, 0(a3,d3.w)
+    dbra    d7, 3b
+9:  move.w  (sp)+, d0
+    cmp.w   (a3), d0
+    beq.s   10f
+    clr.l   pal_known
+10: lea     pal_line, a5
+    moveq   #0, d3
+11: cmp.b   (a3), d3
+    bne.s   12f
+    clr.b   (a5)
+    bra.s   15f
+12: cmp.b   1(a3), d3
+    bne.s   13f
+    move.b  #1, (a5)
+    bra.s   15f
+13: move.w  d3, d0
+    add.w   d0, d0
+    tst.w   0(a1,d0.w)
+    beq.s   14f
+    move.l  pal_known, d0
+    btst    d3, d0
+    bne.s   15f
+    bset    d3, d0
+    move.l  d0, pal_known
+    clr.b   (a5)
+    cmpi.b  #0xff, (a3)
+    beq.s   15f
+    cmpi.b  #0xff, 1(a3)
+    beq.s   15f
+    moveq   #0, d0
+    move.b  (a3), d0
+    bsr.s   pal_distance
+    move.w  d0, d5
+    moveq   #0, d0
+    move.b  1(a3), d0
+    bsr.s   pal_distance
+    cmp.w   d5, d0
+    bcc.s   15f
+    move.b  #1, (a5)
+    bra.s   15f
+14: move.l  pal_known, d0
+    bclr    d3, d0
+    move.l  d0, pal_known
+    clr.b   (a5)
+15: addq.l  #1, a5
+    addq.w  #1, d3
+    cmpi.w  #32, d3
+    blt.s   11b
+    movem.l (sp)+, d0-d7/a0-a5
+    rts
+
+| d3 arcade sprite palette, d0 another -> d0 sum of RGB nibble differences
+pal_distance:
+    lsl.w   #5, d0
+    lea     PALETTES, a2
+    lea     0(a2,d0.w), a4
+    move.w  d3, d0
+    lsl.w   #5, d0
+    adda.w  d0, a2
+    moveq   #0, d0
+    moveq   #14, d7
+1:  move.w  (a2)+, d4
+    move.w  (a4)+, d6
+    moveq   #2, d2
+2:  move.w  d4, d1
+    andi.w  #15, d1
+    move.w  d6, d5
+    andi.w  #15, d5
+    sub.w   d5, d1
+    bpl.s   3f
+    neg.w   d1
+3:  add.w   d1, d0
+    lsr.w   #4, d4
+    lsr.w   #4, d6
+    dbra    d2, 2b
+    dbra    d7, 1b
     rts
 
 | Converts only the colours whose arcade value changed since the last frame.

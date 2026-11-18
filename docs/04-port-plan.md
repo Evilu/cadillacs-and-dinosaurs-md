@@ -80,7 +80,7 @@ How it works:
   - cuts each block into pieces of two tiles side by side (32×16) where the two tiles are consecutive in ROM, otherwise single tiles (16×16), honouring the block's flips;
   - looks each piece up in a 128-slot, 4-way VRAM cache (1,024 patterns) and queues a DMA from ROM for misses, at most 22 per frame;
   - writes the Mega Drive sprite table in the arcade's order, so the arcade's front-most sprites stay in front;
-  - picks the four sprite palettes used by the most tiles, converts them to Mega Drive colours, and sends sprites in other palettes through the first line.
+  - gives sprites two CRAM lines (lines 2 and 3 belong to the backgrounds since milestone 3) and converts their palettes to Mega Drive colours. A line keeps its arcade palette while that palette is on screen, unless another covers more than twice its area; palettes without a line use the line whose colours are closest (sum of RGB differences).
 - **Next VBlank** it sends the queued tiles, the sprite table and the palettes.
 - **The work only happens when the game has finished a new list.** Processing an unterminated list of 256 entries took more than a frame.
 
@@ -95,7 +95,7 @@ Measured in MAME over 100 seconds of attract mode and stage 1 (6,000 frames with
 Known problems:
 
 - **Per-line limits.** 30% of frames have a line with more than 320 sprite pixels or 20 sprites, where the VDP drops the pieces latest in the list. The title logo loses letters this way.
-- **Palettes.** Sprites outside the four busiest palettes use the wrong colours.
+- **Palettes.** Stage 1 shows 4 or 5 sprite palettes at once (11 RAM dumps) against two lines, so some sprites use the wrong colours. Picking the two busiest palettes every 8 frames made characters change colour as they moved: the lines swapped up to 66 times in 10 seconds of scripted play. Keeping each line's palette until it leaves the screen brought that to 0–4.
 - **VBlank can arrive late.** The arcade kernel raises the interrupt mask to level 6 to shut out its own level-2 VBlank; on the Mega Drive that also delays our level-6 VBlank, and in 2.5% of frames the uploads start after the picture has begun.
 
 Still to do in this milestone:
