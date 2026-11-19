@@ -1209,6 +1209,7 @@ emu_move:
     andi.w  #3, d0
     move.b  move_sizes(pc,d0.w), d2
     ext.w   d2
+    ext.l   d2
     move.w  d7, d0
     lsr.w   #3, d0
     andi.w  #7, d0
@@ -1239,6 +1240,7 @@ emu_clr:
     andi.w  #3, d0
     move.b  size_codes(pc,d0.w), d2
     ext.w   d2
+    ext.l   d2
     move.w  d7, d0
     lsr.w   #3, d0
     andi.w  #7, d0
@@ -1257,6 +1259,7 @@ emu_logic:
     andi.w  #3, d0
     move.b  size_codes(pc,d0.w), d2
     ext.w   d2
+    ext.l   d2
     move.w  d7, d1
     rol.w   #7, d1
     andi.w  #7, d1

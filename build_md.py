@@ -3,7 +3,7 @@
 usage: python3 build_md.py <dino.zip or folder> [out.md] [--stage N]
 
 Takes MAME's "dino" set (Cadillacs and Dinosaurs, World 930201), checks the
-eleven files the port uses, and writes the Mega Drive ROM (default
+sixteen files the port uses, and writes the Mega Drive ROM (default
 out/cadillacs_md.md). The set is read straight from the zip; nothing is
 extracted to disk.
 
@@ -25,7 +25,10 @@ GRAPHICS = [
     [('cd-1m.3a', 0x8da4f917), ('cd-3m.5a', 0x6c40f603), ('cd-2m.4a', 0x09c8fc2d), ('cd-4m.6a', 0x637ff38f)],
     [('cd-5m.7a', 0x470befee), ('cd-7m.9a', 0x22bfb7a3), ('cd-6m.8a', 0xe7599ac4), ('cd-8m.10a', 0x211b4b15)],
 ]
+SOUND = [('cd_q.5k', 0x605fdb0b)]
+SAMPLES = [('cd-q1.1k', 0x60927775), ('cd-q2.2k', 0x770f4c47), ('cd-q3.3k', 0x2f273ffc), ('cd-q4.4k', 0x2c67821d)]
 SIZE = 0x80000
+SIZES = {'cd_q.5k': 0x20000}
 
 
 def reader(source):
@@ -39,7 +42,7 @@ def reader(source):
 
     def read(name):
         info = members.get(name)
-        if info is None or info.file_size != SIZE:
+        if info is None or info.file_size != SIZES.get(name, SIZE):
             return None
         return archive.read(info)
     return read
@@ -47,12 +50,12 @@ def reader(source):
 
 def load(read):
     data, problems = {}, []
-    for name, crc in PROGRAM + GRAPHICS[0] + GRAPHICS[1]:
+    for name, crc in PROGRAM + GRAPHICS[0] + GRAPHICS[1] + SOUND + SAMPLES:
         blob = read(name)
         if blob is None:
             problems.append(f'  {name}: missing')
-        elif len(blob) != SIZE or zlib.crc32(blob) != crc:
-            problems.append(f'  {name}: wrong contents (expected {SIZE} bytes, CRC32 {crc:08x}; '
+        elif len(blob) != SIZES.get(name, SIZE) or zlib.crc32(blob) != crc:
+            problems.append(f'  {name}: wrong contents (expected {SIZES.get(name, SIZE)} bytes, CRC32 {crc:08x}; '
                             f'found {len(blob)} bytes, CRC32 {zlib.crc32(blob):08x})')
         data[name] = blob
     if problems:
@@ -96,7 +99,8 @@ def main(argv):
     data = load(reader(source))
     program = b''.join(swap(data[name]) for name, _ in PROGRAM)
     graphics = b''.join(interleave64([data[name] for name, _ in group]) for group in GRAPHICS)
-    build.build(program, graphics, ROOT / 'tools' / 'build' / 'dino_access.csv', out)
+    sound_roms = (data[SOUND[0][0]], b''.join(data[name] for name, _ in SAMPLES))
+    build.build(program, graphics, ROOT / 'tools' / 'build' / 'dino_access.csv', out, sound_roms)
     print(f'\nDone: {out}')
 
 

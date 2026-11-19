@@ -142,6 +142,7 @@ hal_post_reset:
     move.w  #1, conv_gap
     bsr.w   bg_init
     bsr.w   hud_init
+    bsr.w   sound_init
     move.w  #0x8174, VDP_CTRL
     jmp     ARCADE_START
 
@@ -167,6 +168,7 @@ hal_vblank:
     move.w  #0x2700, -(sp)
     jmp     ARCADE_VBLANK
 hal_after:
+    bsr.w   sound_frame
     bsr.w   build_sprites
     bsr.w   bgpal_update
     bsr.w   update_scroll2
@@ -1117,3 +1119,4 @@ vdp_init_end:
     .include "bgpal.s"
     .include "farbg.s"
     .include "hud.s"
+    .include "sound.s"

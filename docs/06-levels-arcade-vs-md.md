@@ -81,4 +81,4 @@ The colour faults in stages 3 to 7 all look like the shared 15-colour background
 
 ## Not confirmed in ares
 
-`tools/check_ares.sh` opened ares v148 with the stage 5 ROM and captured its window ten times: every capture was black with no frame rate in the status bar. Final Fight MD gave the same black captures in the same session, so this says nothing about the build: ares was not drawing (the Mac had been idle for eleven minutes and the ares window was not in front). Whether ares runs the 6 MB ROM and its mapper at all is still unknown. The eight `--stage` ROMs are built and waiting for a session with the screen awake.
+`tools/check_ares.sh` opened ares v148 with the stage 5 ROM and captured its window ten times: every capture was black with no frame rate in the status bar. Final Fight MD gave the same black captures in the same session, so this says nothing about the build: ares was not drawing (the Mac had been idle for eleven minutes and the ares window was not in front). An earlier build was tried in ares by hand (README); none has been captured by this script. The eight `--stage` ROMs are built and waiting for a session with the screen awake.
