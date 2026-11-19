@@ -2,7 +2,7 @@
 
 A port of Capcom's CPS-1 arcade game *Cadillacs and Dinosaurs* (MAME set `dino`, World 930201) to the Sega Mega Drive. The plan is to run Capcom's original 68000 program on the Mega Drive's 68000 and replace only the hardware layer. Target: as close to the arcade as the console allows, at 60 fps.
 
-Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final Fight arcade vs Final Fight MD, 03 Cadillacs and Dinosaurs measured, 04 the port plan and milestone status, 05 save states for every stage, 06 the stages compared with the arcade.
+Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final Fight arcade vs Final Fight MD, 03 Cadillacs and Dinosaurs measured, 04 the port plan and milestone status, 05 save states for every stage, 06 the stages compared with the arcade, 07 sound.
 
 ## Ground rules
 
@@ -20,6 +20,7 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 | `docs/` | Research documents and the port plan |
 | `src/hal.s` | The Mega Drive hardware layer: boot, VBlank, sprites, palettes, input (GNU as, Motorola operand syntax, `\|` comments) |
 | `src/background.s` | Playfield store, plane B ring, tile cache, and the TRAP #8 instruction emulator |
+| `src/sound.s` | Sound: the command taken from the shared RAM's stand-in, the tune stream player, the DAC mailbox |
 | `src/hud.s` | Scroll 1 (text layer) HUD drawn with sprites, and the TRAP #13 / #14 fast paths (recolour loop, text printers) |
 | `build_md.py` | Builds the Mega Drive ROM from the user's `dino.zip` (calls `tools/build/build.py`) |
 | `test/roms/md/` (ignored) | Built ROMs for the user to try |
@@ -30,14 +31,15 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 | `tools/check_md.sh` | One-command headless check of a Mega Drive ROM (`TRACE_INPUT=arcade` plays the port) |
 | `tools/run_md.sh` | Runs a ROM in MAME with the Sega mapper enabled |
 | `tools/level.sh`, `level_states.sh`, `compare_levels.sh` | Start either machine in any stage, make a save state per stage, compare the stages with the arcade (`tools/mame/level.lua`) |
+| `tools/build/sound.py`, `qsound.py`, `qsound_board.c`, `kabuki.py` | Sound at build time: the arcade's Z80 sound program decoded and run, its notes converted to YM2612/PSG streams and DAC PCM |
 | `tools/check_ares.sh` | Runs a ROM in ares, captures its window at intervals and makes a contact sheet |
 | `analysis/` (ignored) | `roms/`, `work/` images, `ghidra/` projects, `out/` exports, `mame/` runs, `venv/` |
 
-`tools/README.md` has the commands. Skills in `.claude/skills/` cover the recurring jobs: `trace-arcade`, `disassemble-68k`, `check-md-rom`, `level-states`.
+`tools/README.md` has the commands. Skills in `.claude/skills/` cover the recurring jobs: `trace-arcade`, `disassemble-68k`, `check-md-rom`, `level-states`, `port-sound`.
 
 ## Environment
 
-- ares v148 is at `~/Downloads/ares-v148/ares.app` (`ARES` overrides the binary). It takes no scripted input, so an ares check shows what a ROM does by itself: the attract sequence, or a stage with a `--stage` ROM. **ares draws nothing when the Mac's screen is asleep or locked or its window is behind others**: every capture is black with no frame rate in the status bar, for any ROM. Run Final Fight MD the same way before blaming a build, and ask the user for a few minutes with the screen awake. So far ares has shown only black here; whether it runs the 6 MB ROM is not known.
+- ares v148 is at `~/Downloads/ares-v148/ares.app` (`ARES` overrides the binary). It takes no scripted input, so an ares check shows what a ROM does by itself: the attract sequence, or a stage with a `--stage` ROM. **ares draws nothing when the Mac's screen is asleep or locked or its window is behind others**: every capture is black with no frame rate in the status bar, for any ROM. Run Final Fight MD the same way before blaming a build, and ask the user for a few minutes with the screen awake. `check_ares.sh` has so far captured only black here (screen asleep); an earlier build was tried in ares by hand.
 - MAME 0.289, BlastEm 1.0.0 and `m68k-elf-binutils` from Homebrew. Ghidra needs `JAVA_HOME=/opt/homebrew/opt/openjdk@21`.
 - Python helpers that need `capstone` or `Pillow` run from `analysis/venv/bin/python3`.
 - MAME needs `qsound.zip` (containing `dl-1425.bin`, CRC `d6cf5ef5`) to run `dino`. A correctly named copy lives in `analysis/mame/qsound_rom/`; pass `-rompath "qsound_rom;../.."` from `analysis/mame`.
@@ -56,6 +58,7 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 - Sprite list is double-buffered at `0x900000` / `0x904000`; scroll 1, 2, 3 tilemaps at `0x908000`, `0x90C000`, `0x910000`; palettes at `0x914000`.
 - **The stage is one byte**, `0xFF84D9` (0-7); the area inside it is `0xFF8786` (0-3). Hold the stage from power-on until play begins (`0xFF84CC` = 1 and main loop mode `0xFF84D0` = 12) and the game starts there, on the Mega Drive build as well. Forcing the area loads no scenery. `0xFF8000` is the main loop's step counter.
 - **Capcom checks its own code in six places.** Three sum bytes `0x30-0x419`; three (`0x104F6`, `0x2A5B6`, `0x5124E`) compare the VBlank handler at `0x564` with a table. A failed check does nothing until an enemy rolls 1 in 64: stage 5 (the wooden town) then stops for 1,200 frames of character profiles. `build.py` makes all six pass. A stage that goes wrong at random may be a seventh.
+- **Sound commands** are packets in the shared RAM at `0xF18000` (odd bytes): index 0 = 0, 1 = command, 6-12 parameters, 15 = 0 to hand over; index 0 = `0xFF` is a control (control 0 stops everything). `0x00-0x26` are tunes, `0x2C-0x91` effects, `0xA0-0xFF` the same effects on other voices. The driver rewrites volume and pitch every 16 ms.
 - Ghidra's function list covers only part of the code: most routines are reached through jump tables and task entry points. Treat "not in `functions.tsv`" as unknown, not as data.
 
 **The Mega Drive side**
@@ -74,6 +77,8 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 - **Budget: about 13,000 68000 instructions per frame.** Measure with MAME's trace (`trace file,maincpu` from Lua with `-debug -debugger none`) and count per routine; estimates in cycles were wrong by 3x. Capcom's code needs about half.
 - **The hardware layer has its own stack** (`hal_enter` / `hal_leave`, `0xFF1CF8–0xFF1FFF`; it reached `0xFF1D7E` in stage 1). Never push more than a few bytes on the arcade's supervisor stack or task stacks.
 - **RAM map** (free block `0xFF0FD3–0xFF7FFF` in stage 1): shadows `0xFF1000`, variables `0xFF12C0–0xFF131F`, sprite engine `0xFF1320–0xFF19A0` (with HUD tables in its gaps `0xFF1620–0xFF169F`, `0xFF1720–0xFF179F`, `0xFF1850–0xFF185F`, `0xFF19A0–0xFF19FF`, and after the far background's 40-slot tables `0xFF1A50`, `0xFF1AB0`), far background tables `0xFF1A00–0xFF1C1F`, HUD cell codes `0xFF1C20–0xFF1CF7`, sprite lists `0xFF2000`, palettes `0xFF3000`, playfield store `0xFF4000`, far background store `0xFF6000`, background cache and palette tables `0xFF7000–0xFF7FFF` (full; see the `.equ` lists in `background.s`, `bgpal.s` and `hud.s`). Check new variables against the next block's start; one overlap broke the sprite chain.
+- **`0xE00000-0xFEFFFF` mirrors work RAM on the Mega Drive; the arcade has nothing there.** A stray write the arcade ignores corrupts the game here. The trap emulator made such writes until its size register was sign-extended to a long; watch all 31 mirrors of an address when a byte changes with no writer (a watchpoint on the one address sees nothing).
+- **Sound** (`docs/07`): variables `0xFF12A0-0xFF12AC`; `0xFF1240-0xFF127F` is the stand-in for the top of the shared RAM, not free. Command table, drum table and Z80 program at ROM `0x186000` (the hardware layer must end before it). Streams and PCM start at ROM `0x600000` and are seen through mapper region 6 (`0xA130FD`, the 68000's stream) and region 5 (`0xA130FB`, the Z80's PCM). Region 4 is read directly for HUD tiles: do not remap it. The build needs a C compiler and keeps the sound program's notes in `cache/` beside the ROM.
 - **Tilemap writes** go through `TRAP #8` (table at ROM `0x190000`, hash at `0x198000`), traps #9–#11 and #13 (fast paths), or are reduced to register side effects for layers not drawn yet (`build.py`). A trap costs about 120 instructions: hot sites need fast paths.
 - **Static patching pitfalls.** A table's start address is often another table's loop end marker (`lea $914000,a1` ends the scroll 3 clear); `build.py` leaves such end markers alone. Capstone invents operands when its buffer is too short; always give it 10+ bytes.
 - **Game RAM is not free.** `0xFF9A00–0xFFAFFF` stays zero in stage 1 dumps but attract mode writes it; the hardware layer's block `0xFF1000–0xFF7FFF` saw only the start-up clear in 5 minutes of attract mode and stage 1 (write tap on the arcade).
@@ -93,6 +98,8 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 - MAME's Lua does not expose the Mega Drive's VRAM or the screen's scanline; `md_trace.lua` rebuilds VRAM from decoded writes and reads the HV counter instead.
 - In MAME's 68000 state, `SP` is the supervisor stack even in user mode; use `USP` for task stacks.
 - A blank `dl-1425.bin` lets MAME boot `dino` without sound if the real file is missing.
+- MAME's Lua memory taps on the Mega Drive stop firing after the cartridge's mapper is written; re-install them every frame, or use debugger watchpoints (`-debug -debugger none -log`, action `logerror`).
+- To make the Mega Drive build play one sound, turn the hardware layer's ready-flag write (`0xFF121F`) into a packet with a write tap (`tools/mame/md_sound.lua`); a poke between frames is overwritten.
 - A loaded save state carries the machine's clock. `-seconds_to_run` shorter than the state's age ends MAME at once, silently, with exit code 0.
 - A game step counter that stops while the PC keeps moving is a task waiting: read the task's saved stack (slot offset 8) for the routine.
 - BlastEm cannot run without a window here.

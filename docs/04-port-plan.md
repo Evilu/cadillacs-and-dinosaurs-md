@@ -207,10 +207,11 @@ Still to do:
 - Palettes: the reduction stalls the game when it runs and is visible for a few frames in play; the title and select screens need it tuned.
 - Sprites at 60 Hz again, by replacing Capcom's sprite list builder instead of converting its output.
 
-### 4. Sound
+### 4. Sound — first version (MAME only, not yet listened to)
 
-- Take over the sound command queue (one routine in the VBlank handler).
-- Z80 driver with FM music re-arranged from the QSound sequences and PCM effects.
+- The arcade's Z80 sound program is run at build time and its notes converted: pitched samples to FM and PSG notes, drums and effects to PCM for the DAC. `docs/07-sound.md` has the method, the measurements and the list of what is not done.
+- **Work in progress: with the HUD and the sound on, play still has performance problems.** The step counter in headless runs did not show the sound's cost (`docs/07-sound.md`); what it misses has to be found.
+- Still to do: listen and tune the instrument sounds and the balance; two PCM sounds at once; panning; effect volume from the command's parameters.
 
 ### 5. Real hardware
 
@@ -243,6 +244,6 @@ TRACE_INPUT=arcade tools/check_md.sh test/roms/md/cadillacs_md.md analysis/mame/
 
 Pad: A = coin, Start = start, B = attack, C = jump.
 
-The ROM is 6 MB and uses the Sega/Krikzz SSF mapper, which its header announces (`SEGA SSF`). MAME enables bank switching only for a software-list entry: `tools/run_md.sh` writes one with slot type `rom_titan` (the Krikzz SSF mapper, 32 banks); MAME 0.289's `rom_ssf2` type implements only the 10 banks Super Street Fighter II used. Other emulators and flash carts read the header.
+The ROM is 8.7 MB (6 MB before sound) and uses the Sega/Krikzz SSF mapper, which its header announces (`SEGA SSF`). MAME enables bank switching only for a software-list entry: `tools/run_md.sh` writes one with slot type `rom_titan` (the Krikzz SSF mapper, 32 banks); MAME 0.289's `rom_ssf2` type implements only the 10 banks Super Street Fighter II used. Other emulators and flash carts read the header.
 
-The current build shows the sprites, the playfield, the far background and the in-game HUD. There is no sound; the known issues are listed in the README. It has been run in emulators only.
+The current build shows the sprites, the playfield, the far background and the in-game HUD, and plays a first version of the music and effects; the known issues are listed in the README. It has been run in emulators only.

@@ -4,7 +4,7 @@ A port of Capcom's 1993 CPS-1 arcade game *Cadillacs and Dinosaurs* to the Sega 
 
 The Mega Drive runs Capcom's own 68000 program; only the hardware layer underneath it is replaced (video, palettes, input, memory map). The goal is a version as close to the arcade as the console allows, at 60 frames a second.
 
-**Status: 0.1.0-alpha.** Stage 1 is playable in emulators, with known issues (below). There is no sound yet.
+**Status: 0.1.0-alpha.** Stage 1 is playable in emulators, with known issues (below). Music and effects have a first version. **This is a work in progress: the HUD and the sound still cause performance problems in play.** The stages will be fixed one at a time from here.
 
 ## ROMs
 
@@ -12,13 +12,14 @@ This repository contains no ROM data. To build, you supply your own dump of the 
 
 ## What you need
 
-- **Your own dump of the arcade game:** MAME's `dino` set (*Cadillacs and Dinosaurs*, World 930201), as `dino.zip` or as a folder of its files. The build checks the eleven files it uses by size and CRC32 and tells you which one is missing or wrong. Clones (`dinou`, `dinoj`, `dinohack` and so on) are not supported.
+- **Your own dump of the arcade game:** MAME's `dino` set (*Cadillacs and Dinosaurs*, World 930201), as `dino.zip` or as a folder of its files. The build checks the sixteen files it uses by size and CRC32 and tells you which one is missing or wrong. Clones (`dinou`, `dinoj`, `dinohack` and so on) are not supported.
 - **Python 3.9 or newer**, with `numpy` and `capstone` (`requirements.txt`).
+- **A C compiler** (`cc`): the build compiles a small emulator of the arcade's sound board and runs the sound program in it. The first build takes about a minute longer for that; the result is kept in a `cache` folder beside the ROM.
 - **GNU binutils for the 68000** (`as`, `ld`, `objcopy`, `nm`):
   - macOS: `brew install m68k-elf-binutils`
   - Debian / Ubuntu: `sudo apt install binutils-m68k-linux-gnu`
   - other: any 68000 binutils; set `M68K_PREFIX` to the tool prefix (for example `M68K_PREFIX=m68k-elf-`).
-- **An emulator with the Sega SSF mapper**: the ROM is 6 MB and banks its graphics through the extended Sega mapper its header announces (`SEGA SSF`). Tried in MAME and ares; BlastEm reads the same header but has not been checked.
+- **An emulator with the Sega SSF mapper**: the ROM is 8.7 MB and banks its graphics and sound through the extended Sega mapper its header announces (`SEGA SSF`). Tried in MAME; the 6 MB build before sound was also tried in ares; BlastEm reads the same header but has not been checked.
 
 ## Build
 
@@ -43,12 +44,15 @@ Pad: **A** inserts a coin, **Start** starts, **B** attacks, **C** jumps. One pla
 
 Everything here was seen or measured in stage 1 under scripted play in MAME. The other seven stages have been started from save states and watched for a minute each; what that showed is in [the stage comparison](docs/06-levels-arcade-vs-md.md): wrong background colours at the start of some stages, holes in the jungle's playfield, the player's portrait missing from the HUD.
 
+**Sound**
+- Music is the arcade's notes re-voiced on FM and PSG with three generic instrument sounds; drums and effects are samples through the DAC, one at a time, so an effect cuts the drums. Panning and echo are gone. Nobody has judged it by ear yet ([details](docs/07-sound.md)).
+
 **Missing**
-- No sound or music.
 - Text layer: only the in-game HUD is drawn (player and enemy panels, score, health bars, "insert coin"), with sprites, over the stage as on the arcade. Stage titles, continue and other mid-screen text, and the title and select screen text are not; player 2's full panel and player 3's are left out. HUD colours are the nearest ones in player 1's palette line (lost health shows dark brown, not red), and changed HUD text takes a few frames to appear in full.
 - Only one player has been tried.
 
 **Speed**
+- The HUD and the sound still slow the game down in play. The HUD measured about 8% fewer sprite lists a second; the sound showed no cost in the headless step count, but it is felt when playing, so that measurement misses something.
 - Sprites are converted every frame when the game keeps up, and every second to fourth frame when it falls behind.
 - Brawls with many enemies run at about 42–58 game frames a second instead of 60.
 - Scene changes and doors opening can stall the game for a few frames while background colours are worked out again.
@@ -79,6 +83,7 @@ From here on, changes go through branches and pull requests: one branch per chan
 - [Port plan and milestone status](docs/04-port-plan.md)
 - [Save states for every stage](docs/05-save-states.md)
 - [The stages, arcade against the Mega Drive build](docs/06-levels-arcade-vs-md.md)
+- [Sound](docs/07-sound.md)
 - [Analysis tools](tools/README.md)
 
 ## Rights

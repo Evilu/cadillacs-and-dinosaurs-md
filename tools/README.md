@@ -123,3 +123,33 @@ tools/check_ares.sh test/roms/md/cadillacs_md_stage3.md analysis/mame/ares_stage
 ```
 
 Opens ares with the ROM, captures only its window (12 times, 4 seconds apart here), closes the ares it started and writes `ares_sheet.png` in the output folder. ares takes no scripted input, so it shows the attract sequence, or a stage with a `--stage` ROM. `ARES` names the binary (default `~/Downloads/ares-v148/ares.app/Contents/MacOS/ares`); the terminal needs macOS screen recording permission, and the screen must be awake.
+
+## 11. Sound
+
+```sh
+cat analysis/roms/dino/cd-q?.?k > analysis/work/dino_qsamples.bin
+analysis/venv/bin/python3 -I tools/analysis/qsound_survey.py analysis/roms/dino/cd_q.5k analysis/sound/cache 30
+analysis/venv/bin/python3 -I tools/build/sound.py analysis/roms/dino/cd_q.5k analysis/work/dino_qsamples.bin analysis/sound/cache
+analysis/venv/bin/python3 -I tools/analysis/qsound_render.py analysis/roms/dino/cd_q.5k analysis/work/dino_qsamples.bin analysis/sound/cache 02 60 analysis/out/tune02.wav
+```
+
+| Script | Does |
+|---|---|
+| `build/kabuki.py` | Decodes the sound program's encrypted first 32 KB into opcodes and data |
+| `build/qsound_board.c` | The QSound board without its DSP: runs the Z80 program and logs its DSP register writes. Compiled on first use |
+| `build/qsound.py` | Plays one command alone in the board and turns the log into notes |
+| `build/sound.py` | The conversion the build runs; alone it prints each tune's repeat, how its notes were placed and the sizes |
+| `analysis/qsound_survey.py` | Every command played alone: length, voices, notes, most voices at once, samples |
+| `analysis/qsound_render.py` | One command mixed from the sample ROM into a WAV: the arcade's tune alone, as a reference |
+| `analysis/compare_audio.py` | Compares the pitch content of two recordings: best lag, agreement, and the same after shifting one by each number of semitones |
+| `mame/qsound_log.lua` | On the arcade: every shared-RAM write of the 68000 and every DSP register write of the Z80, with times |
+| `mame/md_sound.lua` | On the Mega Drive build: plays one command by itself (`SOUND_CMD`, `SOUND_AT`) |
+
+To record: add `-wavwrite <file.wav>` to a MAME run of either machine (it works with `-sound none`). The port's tune alone:
+
+```sh
+SOUND_CMD=02 TRACE_FRAMES=4200 tools/run_md.sh test/roms/md/cadillacs_md.md analysis/mame/snd -video none -sound none \
+  -seconds_to_run 200 -wavwrite $PWD/analysis/mame/snd/md_02.wav -autoboot_script $PWD/tools/mame/md_sound.lua
+```
+
+The command is sent at frame 600; cut the first 10 seconds off the recording before comparing it with the reference.

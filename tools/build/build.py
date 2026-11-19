@@ -38,6 +38,8 @@ ROOT = Path(__file__).resolve().parents[2]
 PROGRAM_SIZE = 0x180000
 HAL_BASE = 0x180000
 COLOUR_TABLE = 0x187F00
+SOUND_TABLE = 0x186000
+SOUND_FIXED = 2 * 256 * 12 + 2
 TILE_FLAGS = 0x188000
 PATCH_TABLE = 0x190000
 PATCH_HASH = 0x198000
@@ -365,7 +367,7 @@ def main(prg_path, gfx_path, access_path, out_path):
     build(Path(prg_path).read_bytes(), Path(gfx_path).read_bytes(), access_path, out_path)
 
 
-def build(prg, gfx, access_path, out_path):
+def build(prg, gfx, access_path, out_path, sound_roms=None):
     rom = bytearray(prg)
     assert len(rom) == PROGRAM_SIZE, 'expected the 1.5 MB dino program image'
     report = []
@@ -398,7 +400,7 @@ def build(prg, gfx, access_path, out_path):
         vectors[i] = sym['hal_crash']
     struct.pack_into('>64I', rom, 0, *vectors)
 
-    assert len(hal) <= COLOUR_TABLE - HAL_BASE
+    assert len(hal) <= SOUND_TABLE - HAL_BASE
     rom += hal
     tiles, flags = convert_tiles(gfx)
     rom += b'\xff' * (COLOUR_TABLE - len(rom))
@@ -418,6 +420,15 @@ def build(prg, gfx, access_path, out_path):
     tiles = bytearray(tiles)
     tiles[FAR_TILES[0] * 512:FAR_TILES[1] * 512] = far_tiles
     rom += tiles
+    rom[SOUND_TABLE:SOUND_TABLE + SOUND_FIXED] = bytes(SOUND_FIXED)
+    if sound_roms:
+        import sound
+        assert len(rom) % sound.BANK == 0
+        fixed, image = sound.convert(sound_roms[0], sound_roms[1], Path(out_path).parent / 'cache',
+                                     len(rom) // sound.BANK, log=report.append)
+        assert len(fixed) <= COLOUR_TABLE - SOUND_TABLE
+        rom[SOUND_TABLE:SOUND_TABLE + len(fixed)] = fixed
+        rom += image
     report.append(f'far background: {sum(far_flags)} of {FAR_TILES[1] - FAR_TILES[0]} 32x32 tiles have pixels')
     rom[0x100:0x200] = header(len(rom) - 1)
     checksum = sum(struct.unpack_from(f'>{(len(rom) - 0x200) // 2}H', rom, 0x200)) & 0xffff
