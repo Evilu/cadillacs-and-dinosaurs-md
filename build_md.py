@@ -1,12 +1,17 @@
 """Build the Mega Drive ROM from your copy of the arcade game.
 
-usage: python3 build_md.py <dino.zip or folder> [out.md]
+usage: python3 build_md.py <dino.zip or folder> [out.md] [--stage N]
 
 Takes MAME's "dino" set (Cadillacs and Dinosaurs, World 930201), checks the
 eleven files the port uses, and writes the Mega Drive ROM (default
 out/cadillacs_md.md). The set is read straight from the zip; nothing is
 extracted to disk.
+
+--stage N (0-7) makes a test ROM that inserts a coin, presses start and begins
+in that stage by itself, for emulators that take no scripted input. It is not
+the game: do not hand it out.
 """
+import os
 import sys
 import zipfile
 import zlib
@@ -71,6 +76,10 @@ def interleave64(parts):
 
 
 def main(argv):
+    if '--stage' in argv:
+        at = argv.index('--stage')
+        os.environ['BOOT_STAGE'] = argv[at + 1]
+        argv = argv[:at] + argv[at + 2:]
     if len(argv) < 2 or argv[1] in ('-h', '--help'):
         sys.exit(__doc__.strip())
     try:

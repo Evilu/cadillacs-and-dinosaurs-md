@@ -47,6 +47,7 @@ TRACE_OUT=ffmd_run TRACE_FRAMES=21600 TRACE_SNAP_EVERY=300 \
 | Script | Does |
 |---|---|
 | `mame/cps1_trace.lua` | Per frame: sprite list, visible tilemap cells, palettes in use, and the graphics working set in Mega Drive 8×8 patterns (blank cells skipped, checked against the graphics ROM), plus a VRAM-sized cache model. Plays the game by script. `LAYER_CTRL` and `LAYER_MASKS` are the CPS-B layer-control offset and enable masks from MAME's `cps1_v.cpp` (`dino`: `0a`, `16,16,16`). `IDLE_FLAG` is the frame flag the game's scheduler polls once per task slot (`ffight`: `ff1100`, `dino`: `ff0152`); reads per frame give the time the CPU spent waiting |
+| `mame/cps1_scroll1.lua` | Scroll 1 (text layer) probe for `dino`: per frame its scroll position, visible and changed cells, patterns, palettes and the colours drawn (pens used); over the run, how often each of the 48 × 28 screen cells shows a pattern, and for the HUD band (`BAND_ROWS`, default 5) the distinct pattern and palette pairs per frame and every attribute word. `GRID_EVERY=n` writes the screen's tile codes every n frames. Same play script as `cps1_trace.lua` |
 | `mame/md_trace.lua` | Decodes every 68000 write to the VDP: DMA size, target and source, fills, copies, CRAM and register writes, writes during active display. Keeps its own VRAM and CRAM copies (MAME does not expose the real VRAM to Lua), walks the sprite table each frame, and dumps VRAM, CRAM and registers at snapshot frames. Plays the game by script |
 
 `dino` also needs MAME's QSound DSP ROM set (`qsound.zip`, containing `dl-1425.bin`) on the ROM path. For `dino`, summarise with `--broad --clock 12e6 --poll-cycles 97.5`.
@@ -80,7 +81,7 @@ The `idle_reads` column of `cps1_trace.lua` and the CPU-load lines of `summarise
 tools/check_md.sh <rom.bin> <out dir> [frames] [snapshot every N frames]
 ```
 
-Runs the ROM headless in MAME's `genesis` driver (through `tools/run_md.sh`, which enables the mapper) with no input and reports whether the CPU is running, plus picture width, sprites, colours, the largest per-frame DMA and sprite-limit overflow. Snapshots and VDP dumps land in the output folder. BlastEm (`brew install blastem`) is the choice for hands-on testing; it needs a window.
+Runs the ROM headless in MAME's `genesis` driver (through `tools/run_md.sh`, which enables the mapper) with no input and reports whether the CPU is running, plus picture width, sprites, colours, the largest per-frame DMA and sprite-limit overflow. Snapshots and VDP dumps land in the output folder, with `md_vram_free.txt` listing the VRAM patterns never written after `WATCH_FROM` (default frame 300). `RAM_WATCH=ff1cb0-ff1fff` adds the lowest address written in that range (the hardware layer's stack depth); `HOLD_HEALTH=1` keeps player 1 alive to reach later scenes. BlastEm (`brew install blastem`) is the choice for hands-on testing; it needs a window.
 
 ## 7. Map hardware accesses and RAM use
 
@@ -101,5 +102,24 @@ TRACE_FRAMES=3600 STATE_EVERY=300 PRESS="700:A,800:Start,1000:B,1600:Right" \
   -seconds_to_run 90 -autoboot_script tools/mame/md_state.lua
 ```
 
-`build.py` needs `capstone` and the `m68k-elf` binutils. `md_state.lua` prints the arcade kernel's task slots, the shadow video registers and player state while pressing pad buttons at the given frames.
+`build.py` needs `capstone` and the `m68k-elf` binutils; `--stage N` after the output name makes a test ROM that starts by itself in stage N. `md_state.lua` prints the arcade kernel's task slots, the shadow video registers and player state while pressing pad buttons at the given frames.
 
+
+## 9. Stages and save states
+
+```sh
+tools/level_states.sh test/roms/md/cadillacs_md.md          # a save state per stage, arcade and Mega Drive
+tools/compare_levels.sh test/roms/md/cadillacs_md.md 3600   # sheets in analysis/out/levels, arcade above the port
+LEVEL=6 TRACE_FRAMES=3000 HOLD="ffb2e0=0064" tools/level.sh arcade analysis/mame/level_runs/a6
+```
+
+`level.sh` runs `mame/level.lua` headless on `dino` (`arcade`) or on a Mega Drive ROM. `LEVEL` holds the stage byte while a game starts; `SAVE` and `LOAD` write and read states in `analysis/mame/states`; `analysis/level_sheet.py` pairs two runs' snapshots. `docs/05-save-states.md` explains the method; the `level-states` skill lists every setting.
+
+## 10. Confirm the picture in ares
+
+```sh
+analysis/venv/bin/python3 -I build_md.py dino.zip test/roms/md/cadillacs_md_stage3.md --stage 3
+tools/check_ares.sh test/roms/md/cadillacs_md_stage3.md analysis/mame/ares_stage3 12 4
+```
+
+Opens ares with the ROM, captures only its window (12 times, 4 seconds apart here), closes the ares it started and writes `ares_sheet.png` in the output folder. ares takes no scripted input, so it shows the attract sequence, or a stage with a `--stage` ROM. `ARES` names the binary (default `~/Downloads/ares-v148/ares.app/Contents/MacOS/ares`); the terminal needs macOS screen recording permission, and the screen must be awake.

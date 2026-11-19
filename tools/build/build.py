@@ -16,6 +16,8 @@ ROM layout:
   0x188000  tile flags: one byte per arcade 16x16 tile, bit 0 if it has pixels, bit 1 if it has no transparent pixel
   0x190000  patch table: count, then per instruction replaced by TRAP #8:
             long address, word length, four words of the original instruction
+  0x1A0000  far background flags: one byte per 32x32 tile, nonzero if it has pixels
+  0x1A2000  text flags: one byte per 8x8 text pattern (code * 2 + half), nonzero if it has pixels
   0x200000  all 32768 arcade 16x16 tiles as four Mega Drive patterns each
             (TL, BL, TR, BR), behind the Sega/Krikzz SSF mapper
 """
@@ -42,6 +44,8 @@ PATCH_HASH = 0x198000
 PATCH_HASH_SIZE = 1024
 TILE_FLAGS3 = 0x1A0000
 FAR_TILES = (0x1C00, 0x2000)
+TEXT_FLAGS = 0x1A2000
+TEXT_CODES = 0x1000
 TILE_DATA = 0x200000
 
 IO_RELOCATIONS = [
@@ -62,14 +66,34 @@ FAST_PATHS = [
     (0x020500, '20db20db41e8003820db20db', 9),
     (0x020564, '20db20db41e8003820db20db', 9),
     (0x0205ac, '20d951ccfffc', 10),
+    (0x016726, '3010c044805930c054483010c044805930c0d0fc007a51cdffe8', 13),
+    (0x016760, '3010c044805930c054483010c044805930c0d0fc007a51cdffe8', 13),
+    (0x000c34, '32c03282', 14),
+    (0x000c8a, '32c03282', 14),
+    (0x000cc2, '32c03282', 14),
+    (0x08506a, '32c032c20640001032c032c2', 15),
+    (0x017a00, '31590000314100023159000431410006', 15),
+    (0x017408, '31590000314100023159000431410006', 15),
+    (0x017660, '317c00200000316b00080002', 15),
 ]
 INLINE_PATCHES = [
     (0x00cc96, '7a1f22d851cdfffc', '41e8008043e90080', None),
     (0x0130e4, '41f90090c00034302002', '4eb9{:08x}4e714e71', 'hal_attr'),
     (0x01366a, '41f90090c00034302002', '4eb9{:08x}4e714e71', 'hal_attr'),
     (0x099f14, '41ed8e667000' '30c0b0fc800066f8', '4eb9{:08x}' + '4e71' * 4, 'hal_clear_game_ram'),
+    (0x01f18a, '7000207c00000030', '203c000137e84e75', None),
+    (0x05a454, '7000207c00000030', '203c000137e84e75', None),
+    (0x05dd30, '7000207c00000030', '203c000137e84e75', None),
+    (0x0104f6, '207c00000564', '80404e754e71', None),
+    (0x02a5b6, '207c00000564', '80404e754e71', None),
+    (0x05124e, '207c00000564', '80404e754e71', None),
 ]
-FAST_PATH_HANDLERS = {9: 'trap_meta', 10: 'trap_copy', 11: 'trap_fill'}
+# The last six are Capcom's anti-tamper checks. Three copies sum bytes 0x30-0x419, which
+# hold the vectors the port replaces; when the sum is wrong they spawn enemies in a state
+# that crashes. Three more compare 38 bytes of the VBlank handler at 0x564, which the port
+# patches, with a table; when they differ an enemy in stage 5 (of 0-7) stops the game for 1,200
+# frames of character profiles. Each copy now returns the passing result.
+FAST_PATH_HANDLERS = {9: 'trap_meta', 10: 'trap_copy', 11: 'trap_fill', 13: 'trap_recolour', 14: 'trap_text', 15: 'trap_hud'}
 SKIPPED_ROUTINES = [
     (0x00a7b8, '207c00918000', 'fills 0x918000, a table the port drops'),
 ]
@@ -112,8 +136,10 @@ def assemble_hal():
     tool = binutils_prefix()
     with tempfile.TemporaryDirectory() as tmp:
         obj, elf, out = (Path(tmp) / n for n in ('hal.o', 'hal.elf', 'hal.bin'))
-        subprocess.run([tool + 'as', '-m68000', '--register-prefix-optional', '-I', str(ROOT / 'src'),
-                        str(ROOT / 'src' / 'hal.s'), '-o', str(obj)], check=True)
+        stage = os.environ.get('BOOT_STAGE')
+        subprocess.run([tool + 'as', '-m68000', '--register-prefix-optional', '-I', str(ROOT / 'src')] +
+                       (['--defsym', f'BOOT_STAGE={int(stage)}'] if stage else []) +
+                       [str(ROOT / 'src' / 'hal.s'), '-o', str(obj)], check=True)
         subprocess.run([tool + 'ld', '-Ttext', hex(HAL_BASE), '-e', hex(HAL_BASE), '-o', str(elf), str(obj)],
                        check=True)
         subprocess.run([tool + 'objcopy', '-O', 'binary', str(elf), str(out)], check=True)
@@ -201,7 +227,7 @@ def apply_fast_paths(rom, sym, report):
     return covered
 
 
-STORED_TABLES = [(0x90c000, 0x914000)]
+STORED_TABLES = [(0x908000, 0x914000)]
 
 
 def drop_replacement(ins):
@@ -304,6 +330,11 @@ def convert_far_tiles(gfx):
     return data.tobytes(), flags.tobytes()
 
 
+def text_flags(gfx):
+    raw = np.frombuffer(gfx[:TEXT_CODES * 64], dtype=np.uint8).reshape(TEXT_CODES, 8, 2, 4)
+    return (raw != 0xff).any(axis=(1, 3)).astype(np.uint8).tobytes()
+
+
 def colour_table():
     table = bytearray(256)
     for bright in range(16):
@@ -380,6 +411,8 @@ def build(prg, gfx, access_path, out_path):
     assert len(rom) <= TILE_FLAGS3
     rom += b'\xff' * (TILE_FLAGS3 - len(rom))
     rom += far_flags
+    assert len(rom) == TEXT_FLAGS
+    rom += text_flags(gfx)
     assert len(rom) <= TILE_DATA
     rom += b'\xff' * (TILE_DATA - len(rom))
     tiles = bytearray(tiles)

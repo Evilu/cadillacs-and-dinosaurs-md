@@ -12,7 +12,7 @@
     .equ S3_END,        0x914000
     .equ S3_STORE,      0xff6000    | (col << 4 | row & 15) * 4: code word, attribute word
     .equ PLANE_A,       0xe000
-    .equ S3_SLOTS,      41
+    .equ S3_SLOTS,      40
     .equ S3_W,          11          | columns drawn: 320 pixels span at most 11
     .equ S3_REF,        0xff1a00
     .equ S3_KEY,        0xff1a60
@@ -52,7 +52,7 @@ s3_slot_pat:
     .word   0x500, 0x510, 0x520, 0x530, 0x540, 0x550, 0x560, 0x570, 0x580, 0x590
     .word   0x5a0, 0x5b0, 0x5c0, 0x5d0, 0x5e0, 0x5f0
     .word   0x6a0, 0x6b0, 0x6c0, 0x6d0, 0x6e0, 0x6f0
-    .word   0x7b4, 0x7c4, 0x7d4, 0x7e4, 0x781
+    .word   0x7b4, 0x7c4, 0x7d4, 0x7e4
 
 s3_init:
     lea     S3_REF, a0

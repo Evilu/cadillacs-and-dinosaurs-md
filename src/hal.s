@@ -28,6 +28,10 @@
     .equ conv_count,    HAL_VARS + 80
     .equ cram_dirty,    HAL_VARS + 82
     .equ ent_left,      HAL_VARS + 66
+    .equ boot_done,     HAL_VARS + 84   | BOOT_STAGE builds: play has begun, stop forcing the stage
+    .equ GAME_IN_PLAY,  0xff84cc    | 1 in a game, 0xff in the demo
+    .equ GAME_MODE,     0xff84d0    | 12 in play
+    .equ GAME_STAGE,    0xff84d9    | 0-7
     .equ RAW_CACHE,     0xff1920    | arcade colour last converted for each CRAM entry
 
     .equ SPRITES_A,     0xff2000    | arcade 0x900000 sprite list
@@ -53,7 +57,7 @@
     .equ MAX_QUEUE,     22
     .equ MAX_SPRITES,   80
 
-    .equ HAL_STACK_LO,  0xff1c20
+    .equ HAL_STACK_LO,  0xff1cf8    | below it: CELL_CODE (hud.s)
     .equ HAL_STACK_TOP, 0xff2000
 
 | The arcade's supervisor stack (0xff0e66) sits just above its task stacks and
@@ -137,6 +141,7 @@ hal_post_reset:
     move.w  d0, last_flag
     move.w  #1, conv_gap
     bsr.w   bg_init
+    bsr.w   hud_init
     move.w  #0x8174, VDP_CTRL
     jmp     ARCADE_START
 
@@ -167,6 +172,7 @@ hal_after:
     bsr.w   update_scroll2
     bsr.w   update_scroll3
     bsr.w   build_cram
+    bsr.w   hud_update
     movem.l (sp)+, d0-d7/a0-a6
     hal_leave
     rte
@@ -299,7 +305,7 @@ build_sprites:
     bne.s   4f
     bsr.w   count_palettes
     bsr.w   assign_lines
-4:  lea     SAT_BUF, a1
+4:  bsr.w   hud_sat
     clr.w   sat_count
     lea     TILE_FLAGS, a2
     move.w  #255, ent_left
@@ -1056,6 +1062,33 @@ read_pad:
     bne.s   8f
     bclr    #4, d2
 8:  move.b  d2, IO_SHADOW + 0x18
+    .ifdef BOOT_STAGE
+    tst.b   boot_done
+    bne.s   10f
+    cmpi.b  #1, GAME_IN_PLAY
+    bne.s   9f
+    cmpi.b  #12, GAME_MODE
+    bne.s   9f
+    st      boot_done
+    rts
+9:  move.b  #BOOT_STAGE, GAME_STAGE
+    moveq   #0, d0
+    move.w  hal_frames + 2, d0
+    divu.w  #120, d0
+    swap    d0
+    cmpi.w  #6, d0
+    bcc.s   11f
+    bclr    #0, IO_SHADOW + 0x18
+11: subi.w  #60, d0
+    cmpi.w  #6, d0
+    bcc.s   12f
+    bclr    #4, IO_SHADOW + 0x18
+12: subi.w  #30, d0
+    cmpi.w  #6, d0
+    bcc.s   10f
+    bclr    #4, IO_SHADOW + 1
+10:
+    .endif
     rts
 
 | Capcom's new-game initialiser clears 0xff0e66-0xff7fff; the hardware layer lives from
@@ -1083,3 +1116,4 @@ vdp_init_end:
     .include "background.s"
     .include "bgpal.s"
     .include "farbg.s"
+    .include "hud.s"

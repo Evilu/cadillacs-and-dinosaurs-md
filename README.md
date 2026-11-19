@@ -41,11 +41,11 @@ Pad: **A** inserts a coin, **Start** starts, **B** attacks, **C** jumps. One pla
 
 ## Known issues (0.1.0-alpha)
 
-Everything here was seen or measured in stage 1 under scripted play in MAME. Later stages have not been played.
+Everything here was seen or measured in stage 1 under scripted play in MAME. The other seven stages have been started from save states and watched for a minute each; what that showed is in [the stage comparison](docs/06-levels-arcade-vs-md.md): wrong background colours at the start of some stages, holes in the jungle's playfield, the player's portrait missing from the HUD.
 
 **Missing**
 - No sound or music.
-- No text layer: the HUD (score, health bars, names), the title and select screen text, the player panels and "insert coin" are not drawn.
+- Text layer: only the in-game HUD is drawn (player and enemy panels, score, health bars, "insert coin"), with sprites, over the stage as on the arcade. Stage titles, continue and other mid-screen text, and the title and select screen text are not; player 2's full panel and player 3's are left out. HUD colours are the nearest ones in player 1's palette line (lost health shows dark brown, not red), and changed HUD text takes a few frames to appear in full.
 - Only one player has been tried.
 
 **Speed**
@@ -64,7 +64,7 @@ Everything here was seen or measured in stage 1 under scripted play in MAME. Lat
 - The logo and the select portraits overlap for a moment between the title and select screens.
 - Barrels sometimes lose pieces or show green stripes.
 - When the tile caches run out, a few background cells can stay blank for up to a second.
-- The jungle scene of the attract-mode demo needs about 190 different playfield tiles; the cache holds 160. Cells without a slot draw a neighbouring cell's tile until a slot frees up, so a few cells show the wrong tile for a while. Seen in MAME only; no other stage has been played.
+- The jungle scene of the attract-mode demo needs about 190 different playfield tiles; the cache holds 160. Cells without a slot draw a neighbouring cell's tile until a slot frees up, so a few cells show the wrong tile for a while. The jungle stage shows the same as black cells.
 
 **Hardware**
 - Never run on a real console or flash cart. Do not try yet: some code paths still touch arcade addresses that a real Mega Drive may not tolerate.
@@ -77,6 +77,8 @@ From here on, changes go through branches and pull requests: one branch per chan
 - [Final Fight: arcade vs Final Fight MD](docs/02-final-fight-arcade-vs-md.md)
 - [Cadillacs and Dinosaurs, measured](docs/03-cadillacs-and-dinosaurs-measured.md)
 - [Port plan and milestone status](docs/04-port-plan.md)
+- [Save states for every stage](docs/05-save-states.md)
+- [The stages, arcade against the Mega Drive build](docs/06-levels-arcade-vs-md.md)
 - [Analysis tools](tools/README.md)
 
 ## Rights
