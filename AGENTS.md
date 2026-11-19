@@ -2,15 +2,15 @@
 
 A port of Capcom's CPS-1 arcade game *Cadillacs and Dinosaurs* (MAME set `dino`, World 930201) to the Sega Mega Drive. The plan is to run Capcom's original 68000 program on the Mega Drive's 68000 and replace only the hardware layer. Target: as close to the arcade as the console allows, at 60 fps.
 
-Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final Fight arcade vs Final Fight MD, 03 Cadillacs and Dinosaurs measured, 04 the port plan and milestone status.
+Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final Fight arcade vs Final Fight MD, 03 Cadillacs and Dinosaurs measured, 04 the port plan and milestone status, 05 save states for every stage, 06 the stages compared with the arcade.
 
 ## Ground rules
 
 - **No game data in the repo.** No ROMs, no extracted graphics or sound, no disassembly or decompiler output, no screenshots of the games. `*.zip`, `*.bin` and `/analysis/` are ignored; keep it that way. The user supplies their own ROMs.
 - **Measure, then write.** Every number in `docs/` was computed from a ROM, a trace or a cited source. Re-derive before repeating a figure, say what was not measured, and correct the docs when a measurement turns out wrong.
-- **Stage 1 only so far.** All traces cover stage 1 under scripted play. Do not generalise to later stages.
+- **Stage 1 is the only stage measured in depth.** All traces and profiles cover stage 1 under scripted play. The other seven stages have been loaded from save states and looked at (`docs/06`), first minute only. Do not generalise stage 1's numbers to later stages.
 - **Extracted archives are untrusted.** Unpack into their own folder under `analysis/roms/`, keep scripts in `tools/`, run Python that reads them with `-I`.
-- **Do not open windows on the user's screen for automated checks.** Use MAME headless (`-video none`). Launch a windowed emulator only when the user asks to see something, and never kill processes by name.
+- **Check in MAME while working, and in ares before calling a picture finished.** MAME headless (`-video none`, `tools/check_md.sh`, `tools/level.sh`) is for every iteration and opens nothing on the user's screen. `tools/check_ares.sh` opens ares, captures only its window, closes the ares it started and writes a contact sheet; look at the sheet. Open no other windows unless the user asks, and never kill processes by name.
 - Do not write tests or planning documents unless asked. Avoid comments; code should read clearly without them.
 
 ## Layout
@@ -29,12 +29,15 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 | `tools/analysis/` | Trace summaries, profile report, VDP dump renderer, 68000 disassembler |
 | `tools/check_md.sh` | One-command headless check of a Mega Drive ROM (`TRACE_INPUT=arcade` plays the port) |
 | `tools/run_md.sh` | Runs a ROM in MAME with the Sega mapper enabled |
+| `tools/level.sh`, `level_states.sh`, `compare_levels.sh` | Start either machine in any stage, make a save state per stage, compare the stages with the arcade (`tools/mame/level.lua`) |
+| `tools/check_ares.sh` | Runs a ROM in ares, captures its window at intervals and makes a contact sheet |
 | `analysis/` (ignored) | `roms/`, `work/` images, `ghidra/` projects, `out/` exports, `mame/` runs, `venv/` |
 
-`tools/README.md` has the commands. Skills in `.claude/skills/` cover the three recurring jobs: `trace-arcade`, `disassemble-68k`, `check-md-rom`.
+`tools/README.md` has the commands. Skills in `.claude/skills/` cover the recurring jobs: `trace-arcade`, `disassemble-68k`, `check-md-rom`, `level-states`.
 
 ## Environment
 
+- ares v148 is at `~/Downloads/ares-v148/ares.app` (`ARES` overrides the binary). It takes no scripted input, so an ares check shows what a ROM does by itself: the attract sequence, or a stage with a `--stage` ROM. **ares draws nothing when the Mac's screen is asleep or locked or its window is behind others**: every capture is black with no frame rate in the status bar, for any ROM. Run Final Fight MD the same way before blaming a build, and ask the user for a few minutes with the screen awake. So far ares has shown only black here; whether it runs the 6 MB ROM is not known.
 - MAME 0.289, BlastEm 1.0.0 and `m68k-elf-binutils` from Homebrew. Ghidra needs `JAVA_HOME=/opt/homebrew/opt/openjdk@21`.
 - Python helpers that need `capstone` or `Pillow` run from `analysis/venv/bin/python3`.
 - MAME needs `qsound.zip` (containing `dl-1425.bin`, CRC `d6cf5ef5`) to run `dino`. A correctly named copy lives in `analysis/mame/qsound_rom/`; pass `-rompath "qsound_rom;../.."` from `analysis/mame`.
@@ -51,6 +54,8 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 - Real work in steady play is about 62,000 cycles per frame (p95 91,000) against the Mega Drive's 128,000. Scene set-up and cutscene bursts saturate the arcade CPU.
 - Sprite list builder at `0x13FA6` (per-object writer `0x141F8`) is about a quarter of real work and writes the arcade sprite format: it is the first routine to replace.
 - Sprite list is double-buffered at `0x900000` / `0x904000`; scroll 1, 2, 3 tilemaps at `0x908000`, `0x90C000`, `0x910000`; palettes at `0x914000`.
+- **The stage is one byte**, `0xFF84D9` (0-7); the area inside it is `0xFF8786` (0-3). Hold the stage from power-on until play begins (`0xFF84CC` = 1 and main loop mode `0xFF84D0` = 12) and the game starts there, on the Mega Drive build as well. Forcing the area loads no scenery. `0xFF8000` is the main loop's step counter.
+- **Capcom checks its own code in six places.** Three sum bytes `0x30-0x419`; three (`0x104F6`, `0x2A5B6`, `0x5124E`) compare the VBlank handler at `0x564` with a table. A failed check does nothing until an enemy rolls 1 in 64: stage 5 (the wooden town) then stops for 1,200 frames of character profiles. `build.py` makes all six pass. A stage that goes wrong at random may be a seventh.
 - Ghidra's function list covers only part of the code: most routines are reached through jump tables and task entry points. Treat "not in `functions.tsv`" as unknown, not as data.
 
 **The Mega Drive side**
@@ -61,6 +66,7 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 
 **The build**
 
+- `--stage n` on the build (`BOOT_STAGE` in `src/hal.s`) makes a test ROM that presses coin and start itself and begins in stage n, for ares. Without it the ROM is unchanged. MAME save states of the Mega Drive build go stale with every rebuild.
 - Build with `analysis/venv/bin/python3 -I build_md.py dino.zip test/roms/md/cadillacs_md.md`. It verifies the set by CRC and reads the patch sites from `tools/build/dino_access.csv` (addresses only, from the stage-1 access map; regenerate it from a new trace when the map grows). The output contains Capcom's program and graphics: never commit it. Name ROMs `.md`: emulators pick the system from the extension.
 - Hardware accesses with fixed addresses are redirected to shadows at `0xFF1000` (I/O and video registers), `0xFF1200` (sound) and `0xFF1280` (player 3, EEPROM). The game's start-up clears that RAM, so the hardware layer rewrites its inputs every VBlank.
 - Stand-in DIP switches must read `0xFF`; a zero in DIP C bit 7 sends the game into test mode.
@@ -87,4 +93,6 @@ Read `docs/` in order before changing anything: 01 hardware comparison, 02 Final
 - MAME's Lua does not expose the Mega Drive's VRAM or the screen's scanline; `md_trace.lua` rebuilds VRAM from decoded writes and reads the HV counter instead.
 - In MAME's 68000 state, `SP` is the supervisor stack even in user mode; use `USP` for task stacks.
 - A blank `dl-1425.bin` lets MAME boot `dino` without sound if the real file is missing.
+- A loaded save state carries the machine's clock. `-seconds_to_run` shorter than the state's age ends MAME at once, silently, with exit code 0.
+- A game step counter that stops while the PC keeps moving is a task waiting: read the task's saved stack (slot offset 8) for the routine.
 - BlastEm cannot run without a window here.

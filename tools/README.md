@@ -102,5 +102,24 @@ TRACE_FRAMES=3600 STATE_EVERY=300 PRESS="700:A,800:Start,1000:B,1600:Right" \
   -seconds_to_run 90 -autoboot_script tools/mame/md_state.lua
 ```
 
-`build.py` needs `capstone` and the `m68k-elf` binutils. `md_state.lua` prints the arcade kernel's task slots, the shadow video registers and player state while pressing pad buttons at the given frames.
+`build.py` needs `capstone` and the `m68k-elf` binutils; `--stage N` after the output name makes a test ROM that starts by itself in stage N. `md_state.lua` prints the arcade kernel's task slots, the shadow video registers and player state while pressing pad buttons at the given frames.
 
+
+## 9. Stages and save states
+
+```sh
+tools/level_states.sh test/roms/md/cadillacs_md.md          # a save state per stage, arcade and Mega Drive
+tools/compare_levels.sh test/roms/md/cadillacs_md.md 3600   # sheets in analysis/out/levels, arcade above the port
+LEVEL=6 TRACE_FRAMES=3000 HOLD="ffb2e0=0064" tools/level.sh arcade analysis/mame/level_runs/a6
+```
+
+`level.sh` runs `mame/level.lua` headless on `dino` (`arcade`) or on a Mega Drive ROM. `LEVEL` holds the stage byte while a game starts; `SAVE` and `LOAD` write and read states in `analysis/mame/states`; `analysis/level_sheet.py` pairs two runs' snapshots. `docs/05-save-states.md` explains the method; the `level-states` skill lists every setting.
+
+## 10. Confirm the picture in ares
+
+```sh
+analysis/venv/bin/python3 -I build_md.py dino.zip test/roms/md/cadillacs_md_stage3.md --stage 3
+tools/check_ares.sh test/roms/md/cadillacs_md_stage3.md analysis/mame/ares_stage3 12 4
+```
+
+Opens ares with the ROM, captures only its window (12 times, 4 seconds apart here), closes the ares it started and writes `ares_sheet.png` in the output folder. ares takes no scripted input, so it shows the attract sequence, or a stage with a `--stage` ROM. `ARES` names the binary (default `~/Downloads/ares-v148/ares.app/Contents/MacOS/ares`); the terminal needs macOS screen recording permission, and the screen must be awake.

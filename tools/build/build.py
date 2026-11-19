@@ -84,10 +84,15 @@ INLINE_PATCHES = [
     (0x01f18a, '7000207c00000030', '203c000137e84e75', None),
     (0x05a454, '7000207c00000030', '203c000137e84e75', None),
     (0x05dd30, '7000207c00000030', '203c000137e84e75', None),
+    (0x0104f6, '207c00000564', '80404e754e71', None),
+    (0x02a5b6, '207c00000564', '80404e754e71', None),
+    (0x05124e, '207c00000564', '80404e754e71', None),
 ]
-# The last three are Capcom's anti-tamper check: it sums bytes 0x30-0x419, which hold
-# the vectors the port replaces, and when the sum is wrong spawns enemies in a state
-# that crashes. Each copy now returns the passing result.
+# The last six are Capcom's anti-tamper checks. Three copies sum bytes 0x30-0x419, which
+# hold the vectors the port replaces; when the sum is wrong they spawn enemies in a state
+# that crashes. Three more compare 38 bytes of the VBlank handler at 0x564, which the port
+# patches, with a table; when they differ an enemy in stage 5 (of 0-7) stops the game for 1,200
+# frames of character profiles. Each copy now returns the passing result.
 FAST_PATH_HANDLERS = {9: 'trap_meta', 10: 'trap_copy', 11: 'trap_fill', 13: 'trap_recolour', 14: 'trap_text', 15: 'trap_hud'}
 SKIPPED_ROUTINES = [
     (0x00a7b8, '207c00918000', 'fills 0x918000, a table the port drops'),
@@ -131,8 +136,10 @@ def assemble_hal():
     tool = binutils_prefix()
     with tempfile.TemporaryDirectory() as tmp:
         obj, elf, out = (Path(tmp) / n for n in ('hal.o', 'hal.elf', 'hal.bin'))
-        subprocess.run([tool + 'as', '-m68000', '--register-prefix-optional', '-I', str(ROOT / 'src'),
-                        str(ROOT / 'src' / 'hal.s'), '-o', str(obj)], check=True)
+        stage = os.environ.get('BOOT_STAGE')
+        subprocess.run([tool + 'as', '-m68000', '--register-prefix-optional', '-I', str(ROOT / 'src')] +
+                       (['--defsym', f'BOOT_STAGE={int(stage)}'] if stage else []) +
+                       [str(ROOT / 'src' / 'hal.s'), '-o', str(obj)], check=True)
         subprocess.run([tool + 'ld', '-Ttext', hex(HAL_BASE), '-e', hex(HAL_BASE), '-o', str(elf), str(obj)],
                        check=True)
         subprocess.run([tool + 'objcopy', '-O', 'binary', str(elf), str(out)], check=True)
